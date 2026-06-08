@@ -19,7 +19,10 @@ export default function Auth() {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { nombre: nombre.trim() || email.split('@')[0] } },
+          options: {
+            data: { nombre: nombre.trim() || email.split('@')[0] },
+            emailRedirectTo: window.location.origin,
+          },
         })
         if (error) throw error
         // Si no hay sesión inmediata, Supabase requiere confirmar email
