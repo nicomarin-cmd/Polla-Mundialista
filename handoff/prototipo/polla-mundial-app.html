@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Polla Mundial 2026 · App</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#000000; --ink-2:#0a0a0a; --panel:#161616; --panel-2:#1f1f1f;
+    --line:rgba(255,255,255,.10); --txt:#ffffff; --muted:#9aa0a6;
+    --lime:#c8ff3c; --orange:#ff8a3d; --win:#37e29a; --lose:#ff5a5f; --gold:#ffc24b;
+    --blue:#2b6bff; --pink:#ff3da9;
+    --shadow:0 20px 50px -14px rgba(0,0,0,.85);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Archivo',sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%, rgba(215,255,62,.10), transparent 60%),
+      radial-gradient(900px 500px at 90% 110%, rgba(255,194,75,.12), transparent 60%), var(--ink);
+    color:var(--txt);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;min-height:100vh;
+    padding:18px 12px;-webkit-font-smoothing:antialiased}
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;opacity:.04;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+
+  /* role switch */
+  .roleswitch{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:5px;margin-bottom:14px;width:100%;max-width:392px}
+  .rs{flex:1;text-align:center;padding:10px 0;border-radius:10px;font-size:12.5px;font-weight:700;color:var(--muted);
+    cursor:pointer;font-family:'Anton';border:none;background:transparent}
+  .rs.on{background:var(--lime);color:#0b0d10}
+  .rs.adminon{background:var(--gold);color:#0b0d10}
+
+  .phone{width:100%;max-width:392px;background:linear-gradient(180deg,var(--ink-2),var(--ink));
+    border:1px solid var(--line);border-radius:34px;box-shadow:var(--shadow);overflow:hidden;position:relative}
+
+  .bar{display:flex;align-items:center;justify-content:space-between;padding:18px 18px 12px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .glyph{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--lime);
+    font-size:19px;box-shadow:0 6px 16px -4px rgba(215,255,62,.5)}
+  .glyph.admin{background:var(--gold);box-shadow:0 6px 16px -4px rgba(255,194,75,.5)}
+  .brand h1{font-family:'Anton';font-weight:800;font-size:18px;letter-spacing:-.5px}
+  .brand small{display:block;color:var(--muted);font-size:10.5px;font-weight:500}
+  .meta{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+  .bal{font-family:'Anton';font-weight:800;font-size:15px;background:var(--panel);
+    border:1px solid var(--line);padding:6px 10px;border-radius:11px;display:flex;align-items:baseline;gap:5px}
+  .bal span{color:var(--lime);font-size:10px}
+  .verified{font-size:10px;color:var(--win);display:flex;align-items:center;gap:4px;font-weight:600}
+  .verified.admin{color:var(--gold)}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--win);box-shadow:0 0 8px var(--win)}
+  .dot.gold{background:var(--gold);box-shadow:0 0 8px var(--gold)}
+
+  .body{padding:4px 16px 18px}
+
+  /* pot hero */
+  .hero{background:linear-gradient(150deg, rgba(255,194,75,.14), rgba(215,255,62,.06));
+    border:1px solid var(--line);border-radius:20px;padding:16px;margin:8px 0 12px}
+  .hero .pot{font-family:'Anton';font-weight:800;font-size:32px;letter-spacing:-1px;line-height:1}
+  .hero .pot span{font-size:15px;color:var(--gold)}
+  .hero .cap{color:var(--muted);font-size:11px;margin-top:3px}
+  .hero .rowx{display:flex;gap:8px;margin-top:13px}
+  .pill{flex:1;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:11px;padding:9px;text-align:center}
+  .pill .v{font-family:'Anton';font-weight:800;font-size:15px}
+  .pill .k{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;font-weight:600;margin-top:2px}
+  .hook{margin-top:12px;background:rgba(55,226,154,.10);border:1px solid rgba(55,226,154,.3);
+    color:var(--win);font-size:11.5px;font-weight:600;padding:9px 11px;border-radius:11px;text-align:center}
+  .hook.warn{background:rgba(255,194,75,.10);border-color:rgba(255,194,75,.3);color:var(--gold)}
+
+  .split{display:flex;gap:8px;margin-bottom:14px}
+  .sp{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:9px;text-align:center}
+  .sp .pos{font-size:10px;color:var(--gold);font-weight:700}
+  .sp .amt{font-family:'Anton';font-weight:800;font-size:13px;margin-top:2px}
+  .sp .pc{font-size:9px;color:var(--muted)}
+
+  /* tabs */
+  .tabs{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:4px;margin-bottom:14px}
+  .tab{flex:1;text-align:center;padding:9px 0;border-radius:9px;font-size:11.5px;font-weight:700;color:var(--muted);cursor:pointer;font-family:'Anton'}
+  .tab.on{background:var(--lime);color:#0b0d10}
+  .tabs.admin .tab.on{background:var(--gold);color:#0b0d10}
+  .panel{display:none}
+  .panel.on{display:block}
+
+  /* match cards */
+  .match{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:13px;margin-bottom:10px}
+  .match.locked{opacity:.85}
+  .match .when{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;font-weight:600;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center}
+  .lockchip{font-size:9px;font-weight:700;color:var(--gold);background:rgba(255,194,75,.12);padding:2px 7px;border-radius:20px}
+  .teams{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .team{display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;min-width:0}
+  .team .fl{font-size:26px;line-height:1}
+  .team .tn{font-size:11px;font-weight:600;text-align:center}
+  .step{display:flex;align-items:center;gap:8px}
+  .step button{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);
+    color:var(--txt);font-size:16px;font-weight:700;cursor:pointer;line-height:1;display:grid;place-items:center}
+  .step button:disabled{opacity:.3;cursor:not-allowed}
+  .step button:active:not(:disabled){transform:scale(.92)}
+  .step .sv{font-family:'Anton';font-weight:800;font-size:22px;min-width:20px;text-align:center}
+  .midv{font-family:'Anton';font-weight:800;color:var(--muted);font-size:12px;align-self:center}
+  .pred{text-align:center;margin-top:10px;font-size:11px;color:var(--lime);font-weight:600}
+  .pred.muted{color:var(--muted)}
+
+  .save{width:100%;background:var(--lime);color:#0b0d10;border:none;border-radius:14px;padding:14px;
+    font-family:'Anton';font-weight:800;font-size:14px;cursor:pointer;margin-top:4px;
+    box-shadow:0 10px 24px -8px rgba(215,255,62,.5)}
+  .save:active{transform:scale(.98)}
+  .save.done{background:var(--panel);color:var(--win);box-shadow:none;border:1px solid rgba(55,226,154,.4)}
+  .save.gold{background:var(--gold);box-shadow:0 10px 24px -8px rgba(255,194,75,.5)}
+  .save.danger{background:var(--lose);color:#fff;box-shadow:0 10px 24px -8px rgba(255,90,95,.5)}
+  .save:disabled{opacity:.4;cursor:not-allowed}
+  .lockmsg{text-align:center;font-size:10px;color:var(--muted);margin-top:8px}
+
+  /* results */
+  .res{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px;
+    display:flex;align-items:center;gap:10px}
+  .res .info{flex:1;min-width:0}
+  .res .ln{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .res .sub{font-size:10.5px;color:var(--muted);margin-top:3px}
+  .res .sub b{color:var(--txt)}
+  .pts{font-family:'Anton';font-weight:800;font-size:14px;padding:6px 9px;border-radius:9px;white-space:nowrap;text-align:center}
+  .pts.exact{background:rgba(55,226,154,.14);color:var(--win)}
+  .pts.result{background:rgba(215,255,62,.13);color:var(--lime)}
+  .pts.miss{background:rgba(139,151,163,.12);color:var(--muted)}
+  .scorebox{font-family:'Anton';font-weight:800}
+
+  .scoring{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:12px;padding:11px;
+    font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7}
+  .scoring b{color:var(--txt)}
+  .scoring .ttl{color:var(--txt);font-family:'Anton';font-weight:800;font-size:12px;display:block;margin-bottom:4px}
+
+  /* leaderboard */
+  .lbrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .lbrow:last-child{border-bottom:none}
+  .lbrow.me{background:rgba(215,255,62,.07);border:1px solid rgba(215,255,62,.25);border-radius:11px;padding:10px;margin:4px 0}
+  .lbrow.podium{background:rgba(255,194,75,.05)}
+  .rk{font-family:'Anton';font-weight:800;font-size:14px;width:26px;text-align:center;color:var(--muted)}
+  .rk.top{color:var(--gold)}
+  .av{width:30px;height:30px;border-radius:9px;flex:none;display:grid;place-items:center;
+    font-family:'Anton';font-weight:800;font-size:12px;color:#0b0d10}
+  .lbrow .nm{flex:1;font-size:12.5px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lbrow .nm small{color:var(--muted);font-weight:600;font-size:9.5px}
+  .lbrow .pp{font-family:'Anton';font-weight:800;font-size:15px;text-align:right}
+  .lbrow .pp small{font-size:9px;color:var(--muted);font-weight:600}
+
+  /* admin generic */
+  .acard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+  .acard .h{font-family:'Anton';font-weight:800;font-size:13px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center}
+  .acard .d{font-size:10.5px;color:var(--muted);line-height:1.5}
+  .statgrid{display:flex;gap:8px;margin-top:11px}
+  .statgrid .pill .v{color:var(--gold)}
+  .badge{font-size:9px;font-weight:700;padding:3px 8px;border-radius:20px}
+  .badge.open{color:var(--win);background:rgba(55,226,154,.12)}
+  .badge.closed{color:var(--lose);background:rgba(255,90,95,.12)}
+
+  .field{margin-bottom:11px}
+  .field label{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-weight:700;margin-bottom:6px}
+  .inp{width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;color:var(--txt);
+    font-family:'Archivo';font-size:13px;padding:10px 11px;outline:none}
+  .inp:focus{border-color:var(--gold)}
+  .rulegrid{display:flex;gap:8px}
+  .rulegrid .field{flex:1;margin-bottom:0}
+  .rulegrid .inp{text-align:center;font-family:'Anton';font-weight:800;font-size:16px}
+  .splitwarn{font-size:10px;color:var(--lose);margin-top:6px;font-weight:600;display:none}
+  .splitwarn.show{display:block}
+
+  .of-set{display:flex;gap:7px;margin-top:11px}
+  .btnmini{flex:1;border:1px solid var(--line);background:var(--panel-2);color:var(--txt);border-radius:10px;
+    padding:9px;font-family:'Anton';font-weight:700;font-size:11px;cursor:pointer}
+  .btnmini.gold{background:var(--gold);color:#0b0d10;border-color:transparent}
+  .btnmini.danger{color:var(--lose);border-color:rgba(255,90,95,.3)}
+  .btnmini:active{transform:scale(.97)}
+  .ofline{text-align:center;margin-top:9px;font-size:11px;font-weight:700}
+  .ofline.set{color:var(--gold)}
+  .ofline.pend{color:var(--muted)}
+
+  .prow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .prow:last-child{border-bottom:none}
+  .prow .pinfo{flex:1;min-width:0}
+  .prow .pn{font-size:12.5px;font-weight:600}
+  .prow .pmeta{font-size:9.5px;color:var(--muted);margin-top:2px}
+  .toggle{font-size:9px;font-weight:700;padding:4px 9px;border-radius:20px;cursor:pointer;border:none;font-family:'Anton'}
+  .toggle.paid{color:var(--win);background:rgba(55,226,154,.12)}
+  .toggle.unpaid{color:var(--lose);background:rgba(255,90,95,.12)}
+  .xbtn{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--muted);
+    cursor:pointer;font-size:13px;line-height:1;display:grid;place-items:center}
+  .addrow{display:flex;gap:7px;margin-top:11px}
+  .addrow .inp{flex:1}
+  .addrow button{background:var(--gold);color:#0b0d10;border:none;border-radius:10px;padding:0 16px;
+    font-family:'Anton';font-weight:800;font-size:13px;cursor:pointer}
+
+  /* winners */
+  .podium-wrap{display:flex;flex-direction:column;gap:9px;margin-bottom:12px}
+  .wcard{display:flex;align-items:center;gap:12px;border-radius:16px;padding:14px;position:relative;overflow:hidden}
+  .wcard.g1{background:linear-gradient(110deg,rgba(255,194,75,.22),rgba(255,194,75,.04));border:1px solid rgba(255,194,75,.4)}
+  .wcard.g2{background:linear-gradient(110deg,rgba(215,255,62,.16),rgba(215,255,62,.03));border:1px solid rgba(215,255,62,.3)}
+  .wcard.g3{background:linear-gradient(110deg,rgba(255,138,61,.16),rgba(255,138,61,.03));border:1px solid rgba(255,138,61,.3)}
+  .wmedal{font-size:30px;line-height:1}
+  .winfo{flex:1;min-width:0}
+  .wname{font-family:'Anton';font-weight:800;font-size:15px}
+  .wsub{font-size:10px;color:var(--muted);margin-top:2px}
+  .wprize{text-align:right}
+  .wprize .pa{font-family:'Anton';font-weight:800;font-size:17px;color:var(--gold)}
+  .wprize .pl{font-size:9px;color:var(--muted)}
+
+  /* fases eliminatorias (por confirmar) */
+  .elimwrap{margin-top:16px}
+  .elimhdr{font-family:'Anton';font-weight:800;font-size:11px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.9px;margin:0 2px 9px;display:flex;align-items:center;gap:7px}
+  .elim{display:flex;align-items:center;gap:11px;background:rgba(255,255,255,.02);border:1px dashed var(--line);
+    border-radius:13px;padding:11px 13px;margin-bottom:8px}
+  .elim .eico{font-size:19px;line-height:1;width:24px;text-align:center}
+  .elim .er{flex:1;min-width:0}
+  .elim .ern{font-family:'Anton';font-weight:800;font-size:13px}
+  .elim .erd{font-size:10px;color:var(--muted);margin-top:2px}
+  .elim .epill{font-size:9px;font-weight:700;color:var(--gold);background:rgba(255,194,75,.10);
+    border:1px solid rgba(255,194,75,.25);padding:4px 9px;border-radius:20px;white-space:nowrap}
+  .star{font-size:9px;font-weight:700;color:var(--gold);background:rgba(255,194,75,.12);padding:2px 7px;border-radius:20px}
+
+  /* ===================================================================
+     CAPA DE ESTILO · inspirada en la identidad del Mundial 2026
+     (negro + lima eléctrico, tipografía póster condensada, "26" de fondo)
+  =================================================================== */
+  body{
+    background:
+      radial-gradient(1100px 520px at 50% -12%, rgba(200,255,60,.12), transparent 62%),
+      radial-gradient(820px 520px at 88% 116%, rgba(43,107,255,.14), transparent 60%),
+      var(--ink) !important;
+  }
+  /* tipografía display Anton en todos los titulares y números */
+  .pot,.pill .v,.sp .amt,.lbrow .pp,.pts,.scorebox,.acard .h,.statgrid .pill .v,
+  .wname,.wprize .pa,.ern,.rk,.av,.step .sv,.midv,.bal,.tab,.rs,.save,.addrow button,
+  .btnmini,.brand h1,.scoring .ttl,.elimhdr,.glyph{font-family:'Anton',sans-serif!important}
+  .brand h1{letter-spacing:.4px;text-transform:uppercase;font-size:19px}
+  .brand small{text-transform:uppercase;letter-spacing:1.3px;font-weight:600;color:var(--muted)}
+  .glyph{font-size:16px;letter-spacing:.5px;color:#0b0d10}
+  .acard .h{text-transform:uppercase;letter-spacing:.4px}
+  .tabs .tab,.roleswitch .rs{text-transform:uppercase;letter-spacing:.7px;font-weight:400}
+  .save{text-transform:uppercase;letter-spacing:.6px;font-weight:400}
+  .pill .k{text-transform:uppercase}
+  /* franja superior multicolor de la marca */
+  .phone::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;z-index:6;
+    background:linear-gradient(90deg,var(--blue),var(--lime) 48%,var(--pink));}
+  /* "26" gigante de fondo en el hero, como en la página oficial */
+  .hero{position:relative;overflow:hidden}
+  .hero>*{position:relative;z-index:1}
+  .hero::after{content:"26";position:absolute;right:-12px;bottom:-52px;font-family:'Anton',sans-serif;
+    font-size:180px;line-height:1;color:rgba(255,255,255,.05);letter-spacing:-8px;z-index:0;pointer-events:none}
+  /* botón lima full-pill estilo "FIFA ID" */
+  .save{border-radius:30px}
+  .glyph{border-radius:12px}
+
+  .toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%) translateY(12px);
+    background:#0e1217;border:1px solid var(--lime);color:var(--lime);font-size:11px;font-weight:600;
+    padding:8px 13px;border-radius:30px;display:flex;align-items:center;gap:7px;opacity:0;
+    transition:opacity .25s, transform .25s;pointer-events:none;white-space:nowrap;z-index:30;
+    box-shadow:0 10px 24px -8px rgba(215,255,62,.35)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast .tdot{width:6px;height:6px;border-radius:50%;background:var(--lime);box-shadow:0 0 7px var(--lime)}
+
+  .foot{padding:12px 18px 18px;border-top:1px solid var(--line);text-align:center}
+  .foot p{font-size:10px;color:var(--muted);line-height:1.5}
+  .foot a{color:var(--lime);cursor:pointer;text-decoration:none}
+</style>
+</head>
+<body>
+  <h2 class="sr-only">App de una polla del Mundial 2026 con vista de jugador y vista de administrador. El admin configura reglas de puntos, registra resultados oficiales y cierra la polla repartiendo el bote a 1, 2 o 3 ganadores. El motor calcula los puntos de forma justa y transparente con criterios de desempate.</h2>
+
+  <div class="roleswitch">
+    <button class="rs on" data-role="jugador">👤 Vista Jugador</button>
+    <button class="rs" data-role="admin">🛡️ Vista Admin</button>
+  </div>
+
+  <div class="phone">
+    <div class="bar">
+      <div class="brand">
+        <div class="glyph" id="glyph">⚽</div>
+        <div><h1>Polla Mundial</h1><small id="brandSub">Mundial 2026</small></div>
+      </div>
+      <div class="meta" id="metaBox"></div>
+    </div>
+
+    <div class="body">
+      <!-- ================= VISTA JUGADOR ================= -->
+      <div id="jugadorRoot">
+        <div class="hero">
+          <div class="pot"><span>cUSD</span> <b id="potVal">0.00</b></div>
+          <div class="cap" id="potCap">Bote total</div>
+          <div class="rowx">
+            <div class="pill"><div class="v" id="hCount">0</div><div class="k">Participan</div></div>
+            <div class="pill"><div class="v" id="hPos">—</div><div class="k">Tu puesto</div></div>
+            <div class="pill"><div class="v" id="hPts">0</div><div class="k">Tus puntos</div></div>
+          </div>
+          <div class="hook" id="hook"></div>
+        </div>
+
+        <div class="split" id="splitJug"></div>
+
+        <div class="tabs" id="tabsJug">
+          <div class="tab on" data-tab="play">Por jugar</div>
+          <div class="tab" data-tab="resj">Resultados</div>
+          <div class="tab" data-tab="tabj">Tabla</div>
+        </div>
+
+        <div class="panel on" id="play">
+          <div id="matches"></div>
+          <button class="save" id="save">Guardar pronósticos · firmar</button>
+          <div class="lockmsg">🔒 Cada pronóstico se bloquea cuando el admin registra el resultado oficial</div>
+          <div id="elimJug"></div>
+        </div>
+
+        <div class="panel" id="resj">
+          <div id="results"></div>
+          <div class="scoring" id="scoringJug"></div>
+        </div>
+
+        <div class="panel" id="tabj">
+          <div id="board"></div>
+          <div class="scoring" id="tieJug" style="margin-top:10px"></div>
+        </div>
+      </div>
+
+      <!-- ================= VISTA ADMIN ================= -->
+      <div id="adminRoot" style="display:none">
+        <div class="acard">
+          <div class="h"><span id="adNombre">Polla</span> <span class="badge open" id="adEstado">Abierta</span></div>
+          <div class="d" id="adMeta"></div>
+          <div class="statgrid">
+            <div class="pill"><div class="v" id="adBote">0.00</div><div class="k">Bote cUSD</div></div>
+            <div class="pill"><div class="v" id="adPart">0</div><div class="k">Pagados</div></div>
+            <div class="pill"><div class="v" id="adJugados">0</div><div class="k">Partidos OK</div></div>
+          </div>
+        </div>
+
+        <div class="tabs admin" id="tabsAdm">
+          <div class="tab on" data-tab="adPartidos">Partidos</div>
+          <div class="tab" data-tab="adReglas">Reglas</div>
+          <div class="tab" data-tab="adGente">Gente</div>
+          <div class="tab" data-tab="adCierre">Cierre</div>
+        </div>
+
+        <div class="panel on" id="adPartidos">
+          <div id="adMatches"></div>
+          <div class="lockmsg">Al registrar el resultado oficial, el partido se cierra y se reparten los puntos.</div>
+          <div id="elimAdm"></div>
+        </div>
+
+        <div class="panel" id="adReglas"></div>
+        <div class="panel" id="adGente"></div>
+        <div class="panel" id="adCierre"></div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"><span class="tdot"></span><span id="toastTxt"></span></div>
+
+    <div class="foot">
+      <p>Estilo inspirado en la identidad del Mundial 2026 · marca propia, no afiliado a la FIFA. Prototipo Rembrand — sin fondos reales. La inscripción y los pronósticos se firmarían onchain en Celo; al cerrar, el contrato repartiría el bote a los mejores de la tabla. · <a id="reset">Reiniciar datos</a></p>
+    </div>
+  </div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+
+  /* ============================================================
+     ESTADO — única fuente de verdad. Ambas vistas se renderizan
+     desde aquí, así que admin y jugador siempre están sincronizados.
+     En producción esto vive en Supabase (ver notas del chat).
+  ============================================================ */
+  var SEED = function(){
+    var s = {
+    polla:{
+      nombre:"Parche del barrio · Mundial 2026",
+      codigo:"MUNDIAL26",
+      inscripcion:2.00,
+      moneda:"cUSD",
+      estado:"abierta",            // "abierta" | "cerrada"
+      admin:"Nicolás",
+      reglas:{ exacto:5, resultado:3, fallo:0 },
+      premios:[50,30,20]           // % para 1°, 2°, 3°
+    },
+    // Fixture REAL del Mundial 2026 (USA · México · Canadá), en orden cronológico.
+    // Todos arrancan como "próximos": el torneo empieza el 11 de junio, nada se ha jugado aún.
+    // ⭐ destacado = partidos de Colombia (Grupo K).
+    partidos:[
+      {id:"m1", fecha:"Jue 11 jun", fase:"Grupo A · CDMX · Inauguración", local:{f:"🇲🇽",n:"México"},        visitante:{f:"🇿🇦",n:"Sudáfrica"},     oficial:null, cerrado:false},
+      {id:"m2", fecha:"Jue 11 jun", fase:"Grupo A · Guadalajara",         local:{f:"🇰🇷",n:"Corea del Sur"},  visitante:{f:"🇨🇿",n:"Chequia"},       oficial:null, cerrado:false},
+      {id:"m3", fecha:"Vie 12 jun", fase:"Grupo B · Toronto",             local:{f:"🇨🇦",n:"Canadá"},         visitante:{f:"🇧🇦",n:"Bosnia"},        oficial:null, cerrado:false},
+      {id:"m4", fecha:"Vie 12 jun", fase:"Grupo D · Los Ángeles",         local:{f:"🇺🇸",n:"EE. UU."},        visitante:{f:"🇵🇾",n:"Paraguay"},      oficial:null, cerrado:false},
+      {id:"m5", fecha:"Sáb 13 jun", fase:"Grupo C · Nueva Jersey",        local:{f:"🇧🇷",n:"Brasil"},         visitante:{f:"🇲🇦",n:"Marruecos"},     oficial:null, cerrado:false},
+      {id:"m6", fecha:"Sáb 13 jun", fase:"Grupo D · Vancouver",           local:{f:"🇦🇺",n:"Australia"},      visitante:{f:"🇹🇷",n:"Turquía"},       oficial:null, cerrado:false},
+      {id:"m7", fecha:"Dom 14 jun", fase:"Fase de grupos · Curazao debuta",local:{f:"🇩🇪",n:"Alemania"},      visitante:{f:"🇨🇼",n:"Curazao"},       oficial:null, cerrado:false},
+      {id:"m8", fecha:"Lun 15 jun", fase:"Fase de grupos · Atlanta",      local:{f:"🇪🇸",n:"España"},         visitante:{f:"🇨🇻",n:"Cabo Verde"},    oficial:null, cerrado:false},
+      {id:"m9", fecha:"Mar 16 jun", fase:"Fase de grupos · Nueva Jersey", local:{f:"🇫🇷",n:"Francia"},        visitante:{f:"🇸🇳",n:"Senegal"},       oficial:null, cerrado:false},
+      {id:"m10",fecha:"Mié 17 jun", fase:"Grupo K · Houston",             local:{f:"🇵🇹",n:"Portugal"},       visitante:{f:"🇨🇩",n:"RD Congo"},      oficial:null, cerrado:false},
+      {id:"m11",fecha:"Mié 17 jun", fase:"Grupo L · Dallas",              local:{f:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",n:"Inglaterra"},   visitante:{f:"🇭🇷",n:"Croacia"},       oficial:null, cerrado:false},
+      {id:"m12",fecha:"Mié 17 jun", fase:"Grupo K · Estadio Azteca",      local:{f:"🇺🇿",n:"Uzbekistán"},     visitante:{f:"🇨🇴",n:"Colombia"},      oficial:null, cerrado:false, destacado:true},
+      {id:"m13",fecha:"Jue 18 jun", fase:"Grupo A · Guadalajara",         local:{f:"🇲🇽",n:"México"},         visitante:{f:"🇰🇷",n:"Corea del Sur"}, oficial:null, cerrado:false},
+      {id:"m14",fecha:"Vie 19 jun", fase:"Grupo D · Seattle",             local:{f:"🇺🇸",n:"EE. UU."},        visitante:{f:"🇦🇺",n:"Australia"},     oficial:null, cerrado:false},
+      {id:"m15",fecha:"Mar 23 jun", fase:"Grupo K · Guadalajara",         local:{f:"🇨🇴",n:"Colombia"},       visitante:{f:"🇨🇩",n:"RD Congo"},      oficial:null, cerrado:false, destacado:true},
+      {id:"m16",fecha:"Mar 23 jun", fase:"Grupo K · Houston",             local:{f:"🇵🇹",n:"Portugal"},       visitante:{f:"🇺🇿",n:"Uzbekistán"},    oficial:null, cerrado:false},
+      {id:"m17",fecha:"Sáb 27 jun", fase:"Grupo K · Miami",               local:{f:"🇨🇴",n:"Colombia"},       visitante:{f:"🇵🇹",n:"Portugal"},      oficial:null, cerrado:false, destacado:true},
+      {id:"m18",fecha:"Sáb 27 jun", fase:"Grupo K · Atlanta",             local:{f:"🇨🇩",n:"RD Congo"},       visitante:{f:"🇺🇿",n:"Uzbekistán"},    oficial:null, cerrado:false}
+    ],
+    // Fases eliminatorias: en blanco / por confirmar (los cruces dependen de los resultados de grupos).
+    eliminatorias:[
+      {ronda:"Ronda de 32",      fecha:"28 jun – 3 jul", sede:"USA · México",       ico:"🎯"},
+      {ronda:"Octavos de final", fecha:"4 – 7 jul",      sede:"USA · México",       ico:"🗓️"},
+      {ronda:"Cuartos de final", fecha:"9 – 11 jul",     sede:"USA",                ico:"🗓️"},
+      {ronda:"Semifinales",      fecha:"14 – 15 jul",    sede:"Dallas · Atlanta",   ico:"🔥"},
+      {ronda:"Tercer lugar",     fecha:"18 jul",         sede:"Miami",              ico:"🥉"},
+      {ronda:"Final",            fecha:"19 jul",         sede:"Nueva Jersey",       ico:"🏆"}
+    ],
+    participantes:[
+      {id:"p1", nombre:"Mateo G.",  esYo:false, pagado:true, orden:1,  pred:{}},
+      {id:"p2", nombre:"Camila R.", esYo:false, pagado:true, orden:2,  pred:{}},
+      {id:"p3", nombre:"Tú",        esYo:true,  pagado:true, orden:3,  pred:{}},
+      {id:"p4", nombre:"Andrés M.", esYo:false, pagado:true, orden:4,  pred:{}},
+      {id:"p5", nombre:"Valentina", esYo:false, pagado:true, orden:5,  pred:{}},
+      {id:"p6", nombre:"Sebastián", esYo:false, pagado:true, orden:6,  pred:{}},
+      {id:"p7", nombre:"Laura P.",  esYo:false, pagado:true, orden:7,  pred:{}},
+      {id:"p8", nombre:"Diego F.",  esYo:false, pagado:true, orden:8,  pred:{}},
+      {id:"p9", nombre:"Nicolás",   esYo:false, pagado:true, orden:9,  pred:{}},
+      {id:"p10",nombre:"Juliana",   esYo:false, pagado:false,orden:10, pred:{}}
+    ]
+    };
+    // Pronósticos de ejemplo, deterministas (mismos en cada carga) para los partidos de grupo.
+    // No todos pronostican todo. Sirven para que la tabla "cobre vida" al registrar resultados.
+    function hsh(a,b){ var h=0,k=a+"|"+b; for(var i=0;i<k.length;i++){h=(h*31+k.charCodeAt(i))>>>0;} return h; }
+    s.participantes.forEach(function(p){
+      s.partidos.forEach(function(m){
+        if(hsh(p.id+"cov",m.id)%5===0) return; // ~20% sin pronosticar todavía
+        p.pred[m.id]={ l:hsh(p.id,m.id)%4, v:hsh(m.id,p.id)%4 };
+      });
+    });
+    return s;
+  };
+
+  var state = SEED();
+  var role = "jugador";
+
+  /* ============================================================
+     MOTOR DE PUNTOS  (justo, transparente, determinista)
+  ============================================================ */
+  function puntosDe(pred, of, r){
+    if(!of)   return {pts:0, kind:"pendiente", tag:"Pendiente"};
+    if(!pred) return {pts:r.fallo, kind:"miss", tag:"Sin pronóstico"};
+    if(pred.l===of.l && pred.v===of.v) return {pts:r.exacto, kind:"exact", tag:"¡Exacto!"};
+    var so=Math.sign(of.l-of.v), sp=Math.sign(pred.l-pred.v);
+    if(so===sp) return {pts:r.resultado, kind:"result", tag:"Resultado"};
+    return {pts:r.fallo, kind:"miss", tag:"Fallaste"};
+  }
+
+  function statsDe(p){
+    var r=state.polla.reglas, total=0, ex=0, re=0;
+    state.partidos.forEach(function(m){
+      if(!m.oficial) return;
+      var x=puntosDe(p.pred[m.id], m.oficial, r);
+      total+=x.pts;
+      if(x.kind==="exact") ex++;
+      if(x.kind==="result") re++;
+    });
+    return {total:total, exactos:ex, resultados:re};
+  }
+
+  // Solo compiten por premio quienes pagaron la inscripción.
+  // Desempate JUSTO y determinista: 1) más puntos  2) más marcadores exactos
+  // 3) más resultados acertados  4) quien se inscribió primero.
+  function ranking(){
+    return state.participantes
+      .filter(function(p){return p.pagado})
+      .map(function(p){return {p:p, s:statsDe(p)}})
+      .sort(function(a,b){
+        return b.s.total-a.s.total
+            || b.s.exactos-a.s.exactos
+            || b.s.resultados-a.s.resultados
+            || a.p.orden-b.p.orden;
+      });
+  }
+
+  function bote(){ return state.participantes.filter(function(p){return p.pagado}).length * state.polla.inscripcion; }
+  function premiados(){ return state.polla.premios.filter(function(x){return x>0}).length; }
+  function fmt(n){ return Number(n).toFixed(2); }
+
+  /* ============================================================
+     UTILIDADES UI
+  ============================================================ */
+  function txHash(){var h="0x",c="0123456789abcdef";for(var i=0;i<4;i++)h+=c[(Math.random()*16)|0];h+="…";for(var j=0;j<4;j++)h+=c[(Math.random()*16)|0];return h;}
+  function toast(m){$("toastTxt").textContent=m;var t=$("toast");t.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(function(){t.classList.remove("show")},2400);}
+  var AVCOLS=["#ffc24b","#d7ff3e","#37e29a","#ff8a3d","#7aa2ff","#ff5a5f","#b48bff","#4be0d6","#ff9ec4","#9bd35a"];
+  function predLabel(m, pr){
+    if(!pr) return "Sin pronóstico";
+    if(pr.l>pr.v) return m.local.n+" gana";
+    if(pr.v>pr.l) return m.visitante.n+" gana";
+    return "Empate";
+  }
+  function yo(){ return state.participantes.find(function(p){return p.esYo}); }
+
+  /* ============================================================
+     RENDER — BARRA SUPERIOR
+  ============================================================ */
+  function renderBar(){
+    if(role==="jugador"){
+      $("glyph").className="glyph"; $("glyph").textContent="26";
+      $("brandSub").textContent="Mundial 2026";
+      $("metaBox").innerHTML=
+        '<div class="bal"><span>cUSD</span><b>10.00</b></div>'+
+        '<div class="verified"><span class="dot"></span> Humano verificado</div>';
+    } else {
+      $("glyph").className="glyph admin"; $("glyph").textContent="🛡️";
+      $("brandSub").textContent="Consola del admin";
+      $("metaBox").innerHTML=
+        '<div class="bal"><span>#</span><b>'+state.polla.codigo+'</b></div>'+
+        '<div class="verified admin"><span class="dot gold"></span> '+state.polla.admin+' · admin</div>';
+    }
+  }
+
+  /* ============================================================
+     RENDER — VISTA JUGADOR
+  ============================================================ */
+  function renderHero(){
+    var rk=ranking(), me=yo();
+    var myStats=statsDe(me);
+    var myPos = rk.findIndex(function(x){return x.p.id===me.id});
+    $("potVal").textContent=fmt(bote());
+    $("potCap").textContent="Bote total · inscrito ✓ · "+fmt(state.polla.inscripcion)+" "+state.polla.moneda+" pagados";
+    $("hCount").textContent=state.participantes.filter(function(p){return p.pagado}).length;
+    $("hPos").textContent = myPos>=0 ? (myPos+1)+"°" : "—";
+    $("hPts").textContent = myStats.total;
+
+    var hook=$("hook");
+    var nPrem=premiados();
+    var hayResultados=state.partidos.some(function(m){return m.oficial});
+    if(state.polla.estado==="cerrada"){
+      hook.className="hook"; 
+      hook.textContent = (myPos>=0 && myPos<nPrem)
+        ? "🏆 ¡Quedaste en el podio! Ganaste "+fmt(bote()*state.polla.premios[myPos]/100)+" "+state.polla.moneda
+        : "Polla cerrada. Esta vez no alcanzó el podio.";
+    } else if(!hayResultados){
+      hook.className="hook";
+      hook.textContent="El Mundial arranca el 11 de junio. ¡Haz y firma tus pronósticos!";
+    } else if(myPos>=0 && myPos<nPrem){
+      hook.className="hook";
+      hook.textContent="Si la polla cerrara hoy, ganarías "+fmt(bote()*state.polla.premios[myPos]/100)+" "+state.polla.moneda;
+    } else if(myPos>=0){
+      var faltan = rk[nPrem-1].s.total - myStats.total + 1;
+      hook.className="hook warn";
+      hook.textContent="Vas "+(myPos+1)+"°. Te faltan "+Math.max(1,faltan)+" pts para entrar al podio.";
+    } else {
+      hook.className="hook warn";
+      hook.textContent="Paga tu inscripción para entrar a competir por el bote.";
+    }
+  }
+
+  function renderSplitJug(){
+    var box=$("splitJug"); box.innerHTML="";
+    var medals=["🥇 1°","🥈 2°","🥉 3°"];
+    state.polla.premios.forEach(function(pct,i){
+      if(pct<=0) return;
+      var el=document.createElement("div"); el.className="sp";
+      el.innerHTML='<div class="pos">'+medals[i]+'</div><div class="amt">'+fmt(bote()*pct/100)+'</div><div class="pc">'+pct+'%</div>';
+      box.appendChild(el);
+    });
+  }
+
+  function renderMatches(){
+    var box=$("matches"); box.innerHTML="";
+    var me=yo();
+    var abiertos = state.partidos.filter(function(m){return !m.cerrado && state.polla.estado==="abierta"});
+    if(abiertos.length===0){
+      box.innerHTML='<div class="acard"><div class="d" style="text-align:center">No hay partidos abiertos para pronosticar. Revisa la pestaña Resultados.</div></div>';
+      $("save").style.display="none";
+    } else {
+      $("save").style.display="";
+      abiertos.forEach(function(m){
+        var pr = me.pred[m.id] || (me.pred[m.id]={l:0,v:0});
+        var el=document.createElement("div"); el.className="match";
+        var tag = m.destacado ? '<span class="star">⭐ Colombia</span>' : '<span>📌 tu pronóstico</span>';
+        el.innerHTML=
+          '<div class="when"><span>'+m.fecha+' · '+m.fase+'</span>'+tag+'</div>'+
+          '<div class="teams">'+
+            '<div class="team"><div class="fl">'+m.local.f+'</div><div class="tn">'+m.local.n+'</div></div>'+
+            '<div class="step"><button data-act="pred" data-m="'+m.id+'" data-s="l" data-d="-1">−</button>'+
+              '<div class="sv">'+pr.l+'</div>'+
+              '<button data-act="pred" data-m="'+m.id+'" data-s="l" data-d="1">+</button></div>'+
+            '<div class="midv">:</div>'+
+            '<div class="step"><button data-act="pred" data-m="'+m.id+'" data-s="v" data-d="-1">−</button>'+
+              '<div class="sv">'+pr.v+'</div>'+
+              '<button data-act="pred" data-m="'+m.id+'" data-s="v" data-d="1">+</button></div>'+
+            '<div class="team"><div class="fl">'+m.visitante.f+'</div><div class="tn">'+m.visitante.n+'</div></div>'+
+          '</div>'+
+          '<div class="pred">'+predLabel(m,pr)+'</div>';
+        box.appendChild(el);
+      });
+    }
+    renderEliminatorias($("elimJug"));
+  }
+
+  function renderResults(){
+    var box=$("results"); box.innerHTML="";
+    var me=yo(), r=state.polla.reglas;
+    var jugados=state.partidos.filter(function(m){return m.oficial});
+    if(jugados.length===0){
+      box.innerHTML='<div class="acard"><div class="d" style="text-align:center">Todavía no hay resultados oficiales registrados.</div></div>';
+    }
+    jugados.forEach(function(m){
+      var pr=me.pred[m.id], x=puntosDe(pr,m.oficial,r);
+      var el=document.createElement("div"); el.className="res";
+      el.innerHTML=
+        '<div class="info">'+
+          '<div class="ln">'+m.local.f+' '+m.local.n+' <span class="scorebox">'+m.oficial.l+'–'+m.oficial.v+'</span> '+m.visitante.n+' '+m.visitante.f+'</div>'+
+          '<div class="sub">Tu pronóstico: <b>'+(pr?(pr.l+'–'+pr.v):'—')+'</b></div>'+
+        '</div>'+
+        '<div class="pts '+x.kind+'">+'+x.pts+'<br><span style="font-size:8px;font-weight:600">'+x.tag+'</span></div>';
+      box.appendChild(el);
+    });
+    var rg=state.polla.reglas;
+    $("scoringJug").innerHTML=
+      '<span class="ttl">Cómo se puntúa</span>'+
+      '✅ Marcador exacto = <b>'+rg.exacto+' pts</b><br>'+
+      '🟡 Resultado acertado (ganador/empate) = <b>'+rg.resultado+' pts</b><br>'+
+      '⚪ Fallaste o sin pronóstico = <b>'+rg.fallo+' pts</b>';
+  }
+
+  function renderBoard(){
+    var box=$("board"); box.innerHTML="";
+    var rk=ranking();
+    var nPrem=premiados();
+    rk.forEach(function(row,i){
+      var b=row.p, s=row.s;
+      var cls="lbrow"+(b.esYo?" me":"")+(i<nPrem?" podium":"");
+      var el=document.createElement("div"); el.className=cls;
+      el.innerHTML=
+        '<div class="rk'+(i<3?" top":"")+'">'+(i+1)+'</div>'+
+        '<div class="av" style="background:'+AVCOLS[i%AVCOLS.length]+'">'+b.nombre[0]+'</div>'+
+        '<div class="nm">'+b.nombre+(i<nPrem?' <small>· podio</small>':'')+'<br><small>'+s.exactos+' exactos · '+s.resultados+' resultados</small></div>'+
+        '<div class="pp">'+s.total+' <small>pts</small></div>';
+      box.appendChild(el);
+    });
+    $("tieJug").innerHTML=
+      '<span class="ttl">Empates se resuelven así</span>'+
+      '1) Más puntos · 2) Más marcadores exactos · 3) Más resultados acertados · 4) Quien se inscribió primero. '+
+      'Reglas iguales para todos = justo y verificable.';
+  }
+
+  // Fases eliminatorias en blanco / por confirmar (usado en jugador y admin)
+  function renderEliminatorias(box){
+    if(!box) return;
+    box.innerHTML="";
+    var w=document.createElement("div"); w.className="elimwrap";
+    w.innerHTML='<div class="elimhdr">🔒 Fases eliminatorias · por confirmar</div>';
+    state.eliminatorias.forEach(function(e){
+      var el=document.createElement("div"); el.className="elim";
+      el.innerHTML=
+        '<div class="eico">'+(e.ico||"🗓️")+'</div>'+
+        '<div class="er"><div class="ern">'+e.ronda+'</div><div class="erd">'+e.fecha+' · '+e.sede+'</div></div>'+
+        '<div class="epill">Por confirmar</div>';
+      w.appendChild(el);
+    });
+    box.appendChild(w);
+  }
+
+  /* ============================================================
+     RENDER — VISTA ADMIN
+  ============================================================ */
+  function renderAdminHeader(){
+    $("adNombre").textContent=state.polla.nombre;
+    var est=$("adEstado");
+    if(state.polla.estado==="abierta"){ est.className="badge open"; est.textContent="Abierta"; }
+    else { est.className="badge closed"; est.textContent="Cerrada"; }
+    $("adMeta").textContent="Código "+state.polla.codigo+" · inscripción "+fmt(state.polla.inscripcion)+" "+state.polla.moneda+" · premios "+state.polla.premios.filter(function(x){return x>0}).join("/")+"%";
+    $("adBote").textContent=fmt(bote());
+    $("adPart").textContent=state.participantes.filter(function(p){return p.pagado}).length;
+    $("adJugados").textContent=state.partidos.filter(function(m){return m.oficial}).length+"/"+state.partidos.length;
+  }
+
+  function renderAdminPartidos(){
+    var box=$("adMatches"); box.innerHTML="";
+    state.partidos.forEach(function(m){
+      var of=m.oficial;
+      var cuantos=state.participantes.filter(function(p){return p.pred[m.id]}).length;
+      var el=document.createElement("div"); el.className="match"+(m.cerrado?" locked":"");
+      var rightTag = m.cerrado
+        ? '<span class="lockchip">🔒 cerrado</span>'
+        : (m.destacado ? '<span class="star">⭐ Colombia</span>' : '<span>'+cuantos+' pronósticos</span>');
+      el.innerHTML=
+        '<div class="when"><span>'+m.fecha+' · '+m.fase+'</span>'+rightTag+'</div>'+
+        '<div class="teams">'+
+          '<div class="team"><div class="fl">'+m.local.f+'</div><div class="tn">'+m.local.n+'</div></div>'+
+          '<div class="step"><button data-act="of" data-m="'+m.id+'" data-s="l" data-d="-1">−</button>'+
+            '<div class="sv">'+(of?of.l:0)+'</div>'+
+            '<button data-act="of" data-m="'+m.id+'" data-s="l" data-d="1">+</button></div>'+
+          '<div class="midv">:</div>'+
+          '<div class="step"><button data-act="of" data-m="'+m.id+'" data-s="v" data-d="-1">−</button>'+
+            '<div class="sv">'+(of?of.v:0)+'</div>'+
+            '<button data-act="of" data-m="'+m.id+'" data-s="v" data-d="1">+</button></div>'+
+          '<div class="team"><div class="fl">'+m.visitante.f+'</div><div class="tn">'+m.visitante.n+'</div></div>'+
+        '</div>'+
+        (of?'<div class="ofline set">Resultado oficial: '+of.l+'–'+of.v+'</div>'
+           :'<div class="ofline pend">Sin resultado oficial</div>')+
+        '<div class="of-set">'+
+          (m.cerrado
+            ? '<button class="btnmini" data-act="reopen-match" data-m="'+m.id+'">Reabrir partido</button>'
+            : '<button class="btnmini gold" data-act="set-of" data-m="'+m.id+'">Registrar resultado oficial</button>')+
+          (of?'<button class="btnmini danger" data-act="clear-of" data-m="'+m.id+'">Quitar</button>':'')+
+        '</div>';
+      box.appendChild(el);
+    });
+    renderEliminatorias($("elimAdm"));
+  }
+
+  function renderAdminReglas(){
+    var r=state.polla.reglas, pr=state.polla.premios;
+    var suma=pr[0]+pr[1]+pr[2];
+    $("adReglas").innerHTML=
+      '<div class="acard">'+
+        '<div class="h">Puntuación</div>'+
+        '<div class="d">Cuántos puntos vale cada acierto. Aplica a todos por igual y recalcula la tabla al instante.</div>'+
+        '<div class="rulegrid" style="margin-top:12px">'+
+          '<div class="field"><label>Exacto</label><input class="inp" type="number" min="0" data-rule="exacto" value="'+r.exacto+'"></div>'+
+          '<div class="field"><label>Resultado</label><input class="inp" type="number" min="0" data-rule="resultado" value="'+r.resultado+'"></div>'+
+          '<div class="field"><label>Fallo</label><input class="inp" type="number" min="0" data-rule="fallo" value="'+r.fallo+'"></div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="acard">'+
+        '<div class="h">Inscripción y premios</div>'+
+        '<div class="d">Define el costo de entrada y cómo se reparte el bote. Pon 0% en 2° o 3° si quieres un único ganador.</div>'+
+        '<div class="field" style="margin-top:12px"><label>Inscripción ('+state.polla.moneda+')</label><input class="inp" type="number" min="0" step="0.5" data-rule="fee" value="'+state.polla.inscripcion+'"></div>'+
+        '<div class="rulegrid">'+
+          '<div class="field"><label>1° %</label><input class="inp" type="number" min="0" max="100" data-rule="prem0" value="'+pr[0]+'"></div>'+
+          '<div class="field"><label>2° %</label><input class="inp" type="number" min="0" max="100" data-rule="prem1" value="'+pr[1]+'"></div>'+
+          '<div class="field"><label>3° %</label><input class="inp" type="number" min="0" max="100" data-rule="prem2" value="'+pr[2]+'"></div>'+
+        '</div>'+
+        '<div class="splitwarn'+(suma!==100?' show':'')+'">⚠ Los porcentajes suman '+suma+'%. Deberían sumar 100%.</div>'+
+      '</div>'+
+      '<div class="scoring">'+
+        '<span class="ttl">Por qué es justo</span>'+
+        '• Solo el admin registra resultados oficiales — nadie puntúa solo.<br>'+
+        '• Cada partido se bloquea al registrar el resultado: no se puede pronosticar "después del pitazo".<br>'+
+        '• Empates: más exactos → más resultados → inscripción más temprana.<br>'+
+        '• Mismas reglas para todos y tabla recalculada en vivo.'+
+      '</div>';
+  }
+
+  function renderAdminGente(){
+    var box=$("adGente"); box.innerHTML="";
+    var card=document.createElement("div"); card.className="acard";
+    card.innerHTML='<div class="h">Participantes <span class="d" style="font-weight:400">'+state.participantes.length+' en total</span></div>'+
+      '<div class="d">Solo los que pagaron compiten por el bote.</div><div id="peopleList" style="margin-top:8px"></div>'+
+      '<div class="addrow"><input class="inp" id="newName" placeholder="Nombre del nuevo participante"><button data-act="add-person">Añadir</button></div>';
+    box.appendChild(card);
+    var list=card.querySelector("#peopleList");
+    state.participantes.forEach(function(p){
+      var s=statsDe(p);
+      var nPred=Object.keys(p.pred).length;
+      var row=document.createElement("div"); row.className="prow";
+      row.innerHTML=
+        '<div class="av" style="background:'+AVCOLS[(p.orden-1)%AVCOLS.length]+'">'+p.nombre[0]+'</div>'+
+        '<div class="pinfo"><div class="pn">'+p.nombre+(p.esYo?' · tú':'')+'</div>'+
+          '<div class="pmeta">'+s.total+' pts · '+nPred+' pronósticos</div></div>'+
+        '<button class="toggle '+(p.pagado?'paid':'unpaid')+'" data-act="toggle-paid" data-p="'+p.id+'">'+(p.pagado?'Pagó':'Pendiente')+'</button>'+
+        '<button class="xbtn" data-act="rm-person" data-p="'+p.id+'">×</button>';
+      list.appendChild(row);
+    });
+  }
+
+  function renderAdminCierre(){
+    var box=$("adCierre"); box.innerHTML="";
+    var rk=ranking(), nPrem=premiados();
+    if(state.polla.estado==="abierta"){
+      var pend=state.partidos.filter(function(m){return !m.oficial}).length;
+      var head=document.createElement("div"); head.className="acard";
+      head.innerHTML='<div class="h">Vista previa del podio</div>'+
+        '<div class="d">Si cerraras ahora, el bote de '+fmt(bote())+' '+state.polla.moneda+' se repartiría así. '+
+        (pend>0?('Aún quedan <b style="color:var(--gold)">'+pend+' partido(s)</b> sin resultado.'):'Todos los partidos tienen resultado.')+'</div>';
+      box.appendChild(head);
+      box.appendChild(buildPodium(rk,nPrem,true));
+      var btn=document.createElement("button"); btn.className="save gold"; btn.setAttribute("data-act","close-polla");
+      btn.textContent="Cerrar polla y repartir el bote";
+      box.appendChild(btn);
+      var note=document.createElement("div"); note.className="lockmsg";
+      note.textContent="Cerrar bloquea pronósticos y resultados y confirma a los ganadores.";
+      box.appendChild(note);
+    } else {
+      var done=document.createElement("div"); done.className="acard";
+      done.innerHTML='<div class="h">🏆 Polla cerrada — ganadores <span class="badge closed">final</span></div>'+
+        '<div class="d">Bote repartido: '+fmt(bote())+' '+state.polla.moneda+'. En producción, aquí el contrato en Celo ejecuta las transferencias a cada ganador.</div>';
+      box.appendChild(done);
+      box.appendChild(buildPodium(rk,nPrem,false));
+      var btn=document.createElement("button"); btn.className="save"; btn.setAttribute("data-act","reopen-polla");
+      btn.textContent="Reabrir polla";
+      box.appendChild(btn);
+    }
+  }
+
+  function buildPodium(rk,nPrem,preview){
+    var wrap=document.createElement("div"); wrap.className="podium-wrap";
+    var medals=["🥇","🥈","🥉"];
+    for(var i=0;i<nPrem;i++){
+      var row=rk[i];
+      var el=document.createElement("div"); el.className="wcard g"+(i+1);
+      if(!row){
+        el.innerHTML='<div class="wmedal">'+medals[i]+'</div><div class="winfo"><div class="wname">—</div><div class="wsub">sin participante</div></div>';
+      } else {
+        el.innerHTML=
+          '<div class="wmedal">'+medals[i]+'</div>'+
+          '<div class="winfo"><div class="wname">'+row.p.nombre+'</div>'+
+            '<div class="wsub">'+row.s.total+' pts · '+row.s.exactos+' exactos · '+row.s.resultados+' resultados</div></div>'+
+          '<div class="wprize"><div class="pa">'+fmt(bote()*state.polla.premios[i]/100)+'</div>'+
+            '<div class="pl">'+state.polla.premios[i]+'% '+(preview?'· estimado':'· '+state.polla.moneda)+'</div></div>';
+      }
+      wrap.appendChild(el);
+    }
+    return wrap;
+  }
+
+  /* ============================================================
+     RENDER MAESTRO
+  ============================================================ */
+  function renderAll(){
+    renderBar();
+    if(role==="jugador"){
+      $("jugadorRoot").style.display="";
+      $("adminRoot").style.display="none";
+      renderHero(); renderSplitJug(); renderMatches(); renderResults(); renderBoard();
+    } else {
+      $("jugadorRoot").style.display="none";
+      $("adminRoot").style.display="";
+      renderAdminHeader(); renderAdminPartidos(); renderAdminReglas(); renderAdminGente(); renderAdminCierre();
+    }
+  }
+
+  /* ============================================================
+     EVENTOS
+  ============================================================ */
+  // role switch
+  document.querySelectorAll(".roleswitch .rs").forEach(function(b){
+    b.addEventListener("click",function(){
+      role=b.getAttribute("data-role");
+      document.querySelectorAll(".roleswitch .rs").forEach(function(x){x.className="rs"});
+      b.className="rs "+(role==="admin"?"adminon":"on");
+      renderAll();
+    });
+  });
+
+  // tabs (jugador + admin)
+  function wireTabs(barId){
+    document.querySelectorAll("#"+barId+" .tab").forEach(function(t){
+      t.addEventListener("click",function(){
+        document.querySelectorAll("#"+barId+" .tab").forEach(function(x){x.classList.remove("on")});
+        var root = barId==="tabsJug" ? "#jugadorRoot" : "#adminRoot";
+        document.querySelectorAll(root+" .panel").forEach(function(p){p.classList.remove("on")});
+        t.classList.add("on"); $(t.getAttribute("data-tab")).classList.add("on");
+      });
+    });
+  }
+  wireTabs("tabsJug"); wireTabs("tabsAdm");
+
+  // jugador: guardar pronósticos
+  $("save").addEventListener("click",function(){
+    if(state.polla.estado!=="abierta") return;
+    this.classList.add("done"); this.textContent="✓ Pronósticos firmados onchain";
+    toast("Pronósticos firmados · "+txHash());
+  });
+
+  // delegación de clicks (botones con data-act)
+  document.addEventListener("click",function(e){
+    var b=e.target.closest("[data-act]"); if(!b) return;
+    var act=b.getAttribute("data-act");
+
+    if(act==="pred"){
+      if(state.polla.estado!=="abierta") return;
+      var me=yo(), id=b.getAttribute("data-m"), s=b.getAttribute("data-s"), d=+b.getAttribute("data-d");
+      var pr=me.pred[id]||(me.pred[id]={l:0,v:0});
+      pr[s]=Math.max(0,Math.min(20,pr[s]+d));
+      var btn=$("save"); btn.classList.remove("done"); btn.textContent="Guardar pronósticos · firmar";
+      renderMatches();
+      return;
+    }
+    if(act==="of"){
+      var m=state.partidos.find(function(x){return x.id===b.getAttribute("data-m")});
+      if(m.cerrado) return;
+      if(!m.oficial) m.oficial={l:0,v:0};
+      var ss=b.getAttribute("data-s"), dd=+b.getAttribute("data-d");
+      m.oficial[ss]=Math.max(0,Math.min(20,m.oficial[ss]+dd));
+      renderAdminPartidos();
+      return;
+    }
+    if(act==="set-of"){
+      var m2=state.partidos.find(function(x){return x.id===b.getAttribute("data-m")});
+      if(!m2.oficial) m2.oficial={l:0,v:0};
+      m2.cerrado=true;
+      toast("Resultado oficial "+m2.oficial.l+"–"+m2.oficial.v+" registrado");
+      renderAll();
+      return;
+    }
+    if(act==="reopen-match"){
+      var m3=state.partidos.find(function(x){return x.id===b.getAttribute("data-m")});
+      m3.cerrado=false;
+      renderAll(); return;
+    }
+    if(act==="clear-of"){
+      var m4=state.partidos.find(function(x){return x.id===b.getAttribute("data-m")});
+      m4.oficial=null; m4.cerrado=false;
+      renderAll(); return;
+    }
+    if(act==="toggle-paid"){
+      var p=state.participantes.find(function(x){return x.id===b.getAttribute("data-p")});
+      p.pagado=!p.pagado; renderAll(); return;
+    }
+    if(act==="rm-person"){
+      var pid=b.getAttribute("data-p");
+      var per=state.participantes.find(function(x){return x.id===pid});
+      if(per && per.esYo){ toast("No puedes eliminarte a ti mismo"); return; }
+      state.participantes=state.participantes.filter(function(x){return x.id!==pid});
+      renderAll(); return;
+    }
+    if(act==="add-person"){
+      var inp=$("newName"); var nm=(inp.value||"").trim();
+      if(!nm){ toast("Escribe un nombre"); return; }
+      var maxOrden=state.participantes.reduce(function(a,x){return Math.max(a,x.orden)},0);
+      state.participantes.push({id:"p"+Date.now(),nombre:nm,esYo:false,pagado:false,orden:maxOrden+1,pred:{}});
+      toast(nm+" añadido (marca como pagado para que compita)");
+      renderAll(); return;
+    }
+    if(act==="close-polla"){
+      var pend=state.partidos.filter(function(x){return !x.oficial}).length;
+      var ok=confirm(pend>0
+        ? "Quedan "+pend+" partido(s) sin resultado. ¿Cerrar la polla de todos modos y repartir el bote?"
+        : "¿Cerrar la polla y confirmar a los ganadores? Esto bloquea pronósticos y resultados.");
+      if(!ok) return;
+      state.polla.estado="cerrada";
+      toast("Polla cerrada · bote repartido");
+      renderAll(); return;
+    }
+    if(act==="reopen-polla"){
+      state.polla.estado="abierta";
+      renderAll(); return;
+    }
+  });
+
+  // delegación de inputs (reglas)
+  document.addEventListener("input",function(e){
+    var t=e.target.closest("[data-rule]"); if(!t) return;
+    var k=t.getAttribute("data-rule"); var v=parseFloat(t.value); if(isNaN(v)) v=0;
+    var r=state.polla.reglas;
+    if(k==="exacto") r.exacto=Math.max(0,v|0);
+    else if(k==="resultado") r.resultado=Math.max(0,v|0);
+    else if(k==="fallo") r.fallo=Math.max(0,v|0);
+    else if(k==="fee") state.polla.inscripcion=Math.max(0,v);
+    else if(k==="prem0") state.polla.premios[0]=Math.max(0,Math.min(100,v|0));
+    else if(k==="prem1") state.polla.premios[1]=Math.max(0,Math.min(100,v|0));
+    else if(k==="prem2") state.polla.premios[2]=Math.max(0,Math.min(100,v|0));
+    // recalcular cabecera + warning sin reconstruir inputs (no perder foco)
+    renderAdminHeader();
+    var suma=state.polla.premios[0]+state.polla.premios[1]+state.polla.premios[2];
+    var warn=document.querySelector("#adReglas .splitwarn");
+    if(warn){ warn.textContent="⚠ Los porcentajes suman "+suma+"%. Deberían sumar 100%."; warn.classList.toggle("show",suma!==100); }
+  });
+
+  $("reset").addEventListener("click",function(){ state=SEED(); role="jugador";
+    document.querySelectorAll(".roleswitch .rs").forEach(function(x,i){x.className="rs"+(i===0?" on":"")});
+    renderAll(); toast("Datos reiniciados");
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>
