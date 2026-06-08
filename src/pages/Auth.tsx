@@ -8,6 +8,7 @@ export default function Auth() {
   const [nombre, setNombre] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -15,12 +16,14 @@ export default function Auth() {
     setLoading(true)
     try {
       if (mode === 'register') {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: { data: { nombre: nombre.trim() || email.split('@')[0] } },
         })
         if (error) throw error
+        // Si no hay sesión inmediata, Supabase requiere confirmar email
+        if (!data.session) setEmailSent(true)
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
@@ -31,6 +34,34 @@ export default function Auth() {
       setLoading(false)
     }
   }
+
+  if (emailSent) return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', minHeight:'100vh', padding:'18px 12px', justifyContent:'center' }}>
+      <div className="phone" style={{ maxWidth:392 }}>
+        <div className="bar">
+          <div className="brand">
+            <div className="glyph">26</div>
+            <div>
+              <h1 className="brand h1">Polla Mundial</h1>
+              <small>Mundial 2026</small>
+            </div>
+          </div>
+        </div>
+        <div className="body">
+          <div className="hero" style={{ marginBottom:20, textAlign:'center' }}>
+            <div className="pot" style={{ fontSize:28 }}>📧</div>
+            <div className="pot" style={{ fontSize:18, marginTop:8 }}>Revisa tu correo</div>
+            <div className="cap" style={{ marginTop:8 }}>
+              Te enviamos un enlace de confirmación a <b style={{ color:'var(--lime)' }}>{email}</b>. Haz clic en el enlace para activar tu cuenta.
+            </div>
+          </div>
+          <button className="save" onClick={() => { setEmailSent(false); setMode('login') }}>
+            Ya confirmé, entrar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', minHeight:'100vh', padding:'18px 12px', justifyContent:'center' }}>
