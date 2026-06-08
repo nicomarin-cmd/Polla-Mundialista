@@ -19,6 +19,7 @@ export default function Pollas() {
   const [showCrear, setShowCrear] = useState(false)
   const [nombre, setNombre] = useState('')
   const [inscripcion, setInscripcion] = useState('2')
+  const [moneda, setMoneda] = useState('COP')
   const [creando, setCreando] = useState(false)
 
   const [showUnirse, setShowUnirse] = useState(false)
@@ -67,6 +68,7 @@ export default function Pollas() {
           codigo: codigoNuevo,
           admin_id: session.user.id,
           inscripcion: isNaN(inscripcionNum) ? 2 : inscripcionNum,
+          moneda,
         })
         .select('id')
         .single()
@@ -82,6 +84,7 @@ export default function Pollas() {
 
       setNombre('')
       setInscripcion('2')
+      setMoneda('COP')
       setShowCrear(false)
       await fetchPollas()
       navigate(`/pollas/${newPoll.id}/admin`)
@@ -101,8 +104,9 @@ export default function Pollas() {
         .from('pollas')
         .select('id')
         .eq('codigo', codigo.trim().toUpperCase())
-        .single()
-      if (errPolla || !polla) throw new Error('Código no encontrado')
+        .maybeSingle()
+      if (errPolla) throw new Error('Error al buscar la polla: ' + errPolla.message)
+      if (!polla) throw new Error('Código no encontrado. Verifica que esté bien escrito.')
 
       const { error: errJoin } = await supabase.from('poll_members').insert({
         poll_id: polla.id,
@@ -204,7 +208,21 @@ export default function Pollas() {
                 placeholder="Ej: Parche del barrio · Mundial 2026" />
             </div>
             <div className="field">
-              <label>Inscripción (cUSD)</label>
+              <label>Moneda</label>
+              <select className="inp" value={moneda} onChange={e => setMoneda(e.target.value)}
+                style={{ cursor:'pointer' }}>
+                <option value="COP">COP — Peso colombiano</option>
+                <option value="USD">USD — Dólar estadounidense</option>
+                <option value="EUR">EUR — Euro</option>
+                <option value="MXN">MXN — Peso mexicano</option>
+                <option value="ARS">ARS — Peso argentino</option>
+                <option value="CLP">CLP — Peso chileno</option>
+                <option value="PEN">PEN — Sol peruano</option>
+                <option value="BRL">BRL — Real brasileño</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Inscripción ({moneda})</label>
               <input
                 className="inp"
                 type="number"
@@ -212,7 +230,7 @@ export default function Pollas() {
                 step="any"
                 value={inscripcion}
                 onChange={e => setInscripcion(e.target.value)}
-                placeholder="Ej: 2"
+                placeholder="Ej: 20000"
               />
             </div>
             {error && <div className="err-msg">{error}</div>}
