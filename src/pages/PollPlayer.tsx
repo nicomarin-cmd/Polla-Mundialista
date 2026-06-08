@@ -293,7 +293,16 @@ export default function PollPlayer() {
           {/* ---- TAB: Por jugar ---- */}
           {activeTab === 'play' && (
             <div>
-              {openMatches.length === 0 ? (
+              {!myMember.pagado ? (
+                <div className="acard" style={{ textAlign:'center' }}>
+                  <div style={{ fontSize:36, marginBottom:10 }}>⏳</div>
+                  <div className="h" style={{ justifyContent:'center' }}>Inscripción pendiente</div>
+                  <div className="d" style={{ marginTop:6, lineHeight:1.6 }}>
+                    El admin debe confirmar tu pago para que puedas hacer pronósticos.
+                    <br />Una vez que te active, podrás jugar todos los partidos abiertos.
+                  </div>
+                </div>
+              ) : openMatches.length === 0 ? (
                 <div className="acard">
                   <div className="d" style={{ textAlign:'center' }}>
                     {poll.estado === 'cerrada'
