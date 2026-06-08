@@ -33,6 +33,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: userData } = await supabase.auth.getUser()
     const nombre =
       (userData.user?.user_metadata?.nombre as string | undefined) ||
+      (userData.user?.user_metadata?.full_name as string | undefined) ||
+      (userData.user?.user_metadata?.name as string | undefined) ||
       userData.user?.email?.split('@')[0] ||
       'Usuario'
 
