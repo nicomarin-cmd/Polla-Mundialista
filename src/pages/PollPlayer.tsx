@@ -348,7 +348,12 @@ export default function PollPlayer() {
     if (alcance === 'mundial') return true
     if (alcance === 'grupos') return /grupo/i.test(m.fase)
     if (alcance === 'eliminatorias') return !/grupo/i.test(m.fase)
-    if (alcance === 'seleccion') return (poll.reglas.partidos_seleccionados ?? []).includes(m.id)
+    if (alcance === 'seleccion') {
+      const sel = poll.reglas.partidos_seleccionados ?? []
+      // Si el admin aún no eligió partidos, mostramos todos para que no quede en blanco
+      if (sel.length === 0) return true
+      return sel.includes(m.id)
+    }
     return true
   }
   const scopedMatches = matches.filter(inScope)
@@ -474,16 +479,19 @@ export default function PollPlayer() {
                 </div>
               )}
 
-              {openMatches.length === 0 ? (
+              {scopedMatches.length === 0 ? (
                 <div className="acard">
                   <div className="d" style={{ textAlign:'center' }}>
                     {poll.estado === 'cerrada'
                       ? 'La polla está cerrada. Revisa la tabla final.'
-                      : 'No hay partidos abiertos para apostar.'}
+                      : alcance === 'seleccion'
+                        ? 'El admin aún no ha elegido los partidos de esta polla.'
+                        : 'No hay partidos disponibles todavía.'}
                   </div>
                 </div>
               ) : (
                 <>
+                  {/* Partidos abiertos — con controles de apuesta */}
                   {openMatches.map(m => {
                     const ms = matchSaveState[m.id] || 'idle'
                     return (
@@ -531,15 +539,67 @@ export default function PollPlayer() {
                     )
                   })}
 
-                  <button
-                    className={`save ${saveState === 'saved' ? 'done' : ''}`}
-                    onClick={savePreds}
-                    disabled={saving}
-                    style={{ marginTop:8 }}
-                  >
-                    {saving ? 'Guardando...' : saveState === 'saved' ? '✓ Todas guardadas' : 'Guardar todas las apuestas'}
-                  </button>
-                  <div className="lockmsg">🔒 Cada apuesta se bloquea cuando el admin registra el resultado del partido</div>
+                  {openMatches.length > 0 && (
+                    <>
+                      <button
+                        className={`save ${saveState === 'saved' ? 'done' : ''}`}
+                        onClick={savePreds}
+                        disabled={saving}
+                        style={{ marginTop:8 }}
+                      >
+                        {saving ? 'Guardando...' : saveState === 'saved' ? '✓ Todas guardadas' : 'Guardar todas las apuestas'}
+                      </button>
+                      <div className="lockmsg">🔒 Cada apuesta se bloquea cuando el admin registra el resultado del partido</div>
+                    </>
+                  )}
+
+                  {/* Partidos cerrados — solo lectura */}
+                  {closedMatches.length > 0 && (
+                    <div style={{ marginTop: openMatches.length > 0 ? 18 : 0 }}>
+                      <div className="elimhdr" style={{ marginBottom:6 }}>
+                        🔒 {openMatches.length > 0 ? 'Partidos ya cerrados' : poll.estado === 'cerrada' ? 'Polla cerrada · sin apuestas' : 'Todos los partidos están cerrados'}
+                      </div>
+                      {openMatches.length === 0 && (
+                        <div style={{ fontSize:11, color:'var(--muted)', marginBottom:10, textAlign:'center' }}>
+                          El admin registró los resultados. Ve a <b>Resultados</b> para ver tus puntos.
+                        </div>
+                      )}
+                      {closedMatches.map(m => {
+                        const pr = preds[m.id]
+                        const hasResult = m.resultado_local !== null
+                        return (
+                          <div key={m.id} className="match" style={{ opacity:0.65 }}>
+                            <div className="when">
+                              <span>{m.fecha} · {m.fase}</span>
+                              <span style={{ fontSize:9, color:'var(--lime)', fontWeight:700 }}>🔒 Cerrado</span>
+                            </div>
+                            <div className="teams">
+                              <div className="team">
+                                <div className="fl">{m.flag_local}</div>
+                                <div className="tn">{m.equipo_local}</div>
+                              </div>
+                              <div style={{ minWidth:60, textAlign:'center' }}>
+                                {hasResult ? (
+                                  <div style={{ fontFamily:"'Anton',sans-serif", fontSize:20, color:'var(--txt)', letterSpacing:1 }}>
+                                    {m.resultado_local}–{m.resultado_visitante}
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize:18, color:'var(--muted)' }}>–</div>
+                                )}
+                              </div>
+                              <div className="team">
+                                <div className="fl">{m.flag_visitante}</div>
+                                <div className="tn">{m.equipo_visitante}</div>
+                              </div>
+                            </div>
+                            <div style={{ textAlign:'center', fontSize:10, color:'var(--muted)', marginTop:6 }}>
+                              Tu apuesta: <b style={{ color:'var(--txt)' }}>{pr ? `${pr.local}–${pr.visitante}` : 'Sin apuesta'}</b>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </>
               )}
 
