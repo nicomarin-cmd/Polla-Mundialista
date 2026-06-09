@@ -468,16 +468,13 @@ export default function PollPlayer() {
           {/* ---- TAB: Apuestas ---- */}
           {activeTab === 'play' && (
             <div>
-              {!myMember.pagado ? (
-                <div className="acard" style={{ textAlign:'center' }}>
-                  <div style={{ fontSize:36, marginBottom:10 }}>⏳</div>
-                  <div className="h" style={{ justifyContent:'center' }}>Inscripción pendiente</div>
-                  <div className="d" style={{ marginTop:6, lineHeight:1.6 }}>
-                    El admin debe confirmar tu pago para que puedas registrar apuestas.
-                    <br />Una vez que te active, podrás jugar todos los partidos abiertos.
-                  </div>
+              {!myMember.pagado && (
+                <div className="hook warn" style={{ marginBottom:12, textAlign:'left', lineHeight:1.5 }}>
+                  ⏳ <b>Inscripción pendiente</b> — el admin debe confirmar tu pago para que tus puntos cuenten hacia el bote. Igual podés hacer tus apuestas ahora.
                 </div>
-              ) : openMatches.length === 0 ? (
+              )}
+
+              {openMatches.length === 0 ? (
                 <div className="acard">
                   <div className="d" style={{ textAlign:'center' }}>
                     {poll.estado === 'cerrada'
