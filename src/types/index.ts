@@ -5,6 +5,8 @@ export interface Profile {
   created_at: string
 }
 
+export type Alcance = 'mundial' | 'grupos' | 'eliminatorias' | 'seleccion'
+
 export interface Polla {
   id: string
   nombre: string
@@ -13,7 +15,13 @@ export interface Polla {
   inscripcion: number
   moneda: string
   estado: 'abierta' | 'cerrada'
-  reglas: { exacto: number; resultado: number; fallo: number }
+  reglas: {
+    exacto: number
+    resultado: number
+    fallo: number
+    alcance?: Alcance
+    partidos_seleccionados?: string[]
+  }
   premios: number[]
   created_at: string
 }

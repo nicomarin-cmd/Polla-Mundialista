@@ -2,7 +2,16 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import type { Polla, Partido, PollMemberWithProfile, TablaRow } from '../types'
+import type { Polla, Partido, PollMemberWithProfile, TablaRow, Alcance } from '../types'
+
+const ALCANCE_OPTS: { id: Alcance; ico: string; title: string; desc: string }[] = [
+  { id: 'mundial',       ico: '🌍', title: 'Todo el Mundial',     desc: 'Todos los partidos: grupos + eliminatorias' },
+  { id: 'grupos',        ico: '🏟️', title: 'Solo Fase de Grupos', desc: 'Solo los 48 partidos de la fase de grupos' },
+  { id: 'eliminatorias', ico: '⚡', title: 'Solo Eliminatorias',   desc: 'Desde los 32avos hasta la gran final' },
+  { id: 'seleccion',     ico: '🎯', title: 'Partidos a elegir',    desc: 'Marcá manualmente cuáles partidos entran' },
+]
+
+function isGrupo(fase: string) { return /grupo/i.test(fase) }
 
 const AVCOLS = ['#ffc24b','#d7ff3e','#37e29a','#ff8a3d','#7aa2ff','#ff5a5f','#b48bff','#4be0d6','#ff9ec4','#9bd35a']
 const MEDALS = ['🥇','🥈','🥉']
@@ -31,11 +40,9 @@ export default function PollAdmin() {
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
 
-  // Match score editing state: official result inputs
   const [matchScores, setMatchScores] = useState<Record<string, { local: number; visitante: number }>>({})
   const [submitting, setSubmitting] = useState<string | null>(null)
 
-  // Rules editing state
   const [exacto, setExacto] = useState(5)
   const [resultado, setResultado] = useState(3)
   const [fallo, setFallo] = useState(0)
@@ -43,9 +50,10 @@ export default function PollAdmin() {
   const [prem1, setPrem1] = useState(30)
   const [prem2, setPrem2] = useState(20)
   const [inscFee, setInscFee] = useState(2)
+  const [alcanceOp, setAlcanceOp] = useState<Alcance>('mundial')
+  const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([])
   const [savingRules, setSavingRules] = useState(false)
 
-  // Close poll
   const [closing, setClosing] = useState(false)
 
   const showToast = (msg: string) => {
@@ -79,7 +87,6 @@ export default function PollAdmin() {
     setMatches(ms)
     setMembers((membersData || []) as PollMemberWithProfile[])
 
-    // Init score inputs from existing results
     const scores: Record<string, { local: number; visitante: number }> = {}
     ms.forEach(m => {
       scores[m.id] = {
@@ -98,6 +105,8 @@ export default function PollAdmin() {
       setPrem1(premios[1] ?? 30)
       setPrem2(premios[2] ?? 20)
       setInscFee(p.inscripcion)
+      setAlcanceOp(p.reglas.alcance ?? 'mundial')
+      setSelectedMatchIds(p.reglas.partidos_seleccionados ?? [])
     }
 
     await loadTabla()
@@ -106,7 +115,6 @@ export default function PollAdmin() {
 
   useEffect(() => { loadAll() }, [loadAll])
 
-  // Verify this user is admin
   useEffect(() => {
     if (!loading && poll && poll.admin_id !== session?.user.id) {
       navigate(`/pollas/${pollId}`)
@@ -162,7 +170,11 @@ export default function PollAdmin() {
     if (!pollId) return
     setSavingRules(true)
     const { error } = await supabase.from('pollas').update({
-      reglas: { exacto, resultado, fallo },
+      reglas: {
+        exacto, resultado, fallo,
+        alcance: alcanceOp,
+        partidos_seleccionados: alcanceOp === 'seleccion' ? selectedMatchIds : [],
+      },
       premios: [prem0, prem1, prem2],
       inscripcion: inscFee,
     }).eq('id', pollId)
@@ -170,6 +182,12 @@ export default function PollAdmin() {
     if (error) { showToast('Error: ' + error.message); return }
     showToast('Reglas guardadas ✓')
     await loadAll()
+  }
+
+  const toggleMatchSelection = (matchId: string) => {
+    setSelectedMatchIds(prev =>
+      prev.includes(matchId) ? prev.filter(id => id !== matchId) : [...prev, matchId]
+    )
   }
 
   const cerrarPolla = async () => {
@@ -229,7 +247,7 @@ export default function PollAdmin() {
 
         <div className="body">
           {/* Header card */}
-          <div className="acard">
+          <div className="acard" style={{ borderColor:'rgba(255,194,75,.25)', background:'rgba(255,194,75,.04)' }}>
             <div className="h">
               {poll.nombre}
               <span className={`badge ${poll.estado === 'abierta' ? 'open' : 'closed'}`}>
@@ -237,7 +255,7 @@ export default function PollAdmin() {
               </span>
             </div>
             <div className="d">
-              Código: <b style={{ color:'var(--txt)', fontFamily:"'Anton',sans-serif" }}>{poll.codigo}</b>
+              Código: <b style={{ color:'var(--txt)', fontFamily:"'Anton',sans-serif", letterSpacing:2 }}>{poll.codigo}</b>
               {' '}· inscripción {fmt(poll.inscripcion)} {poll.moneda}
               {' '}· premios {premios.filter(p => p > 0).join('/')}%
             </div>
@@ -294,28 +312,111 @@ export default function PollAdmin() {
                     {m.cerrado
                       ? <div className="ofline set">Resultado oficial: {m.resultado_local}–{m.resultado_visitante}</div>
                       : <div className="ofline pend">Sin resultado oficial</div>}
-                    <div className="of-set">
-                      {m.cerrado ? (
-                        <button className="btnmini" onClick={() => reopenMatch(m.id)}>Reabrir</button>
-                      ) : (
-                        <button className="btnmini gold" onClick={() => submitResult(m)} disabled={isSubmitting}>
-                          {isSubmitting ? 'Guardando...' : 'Registrar resultado'}
-                        </button>
-                      )}
+
+                    {/* Admin-only action box */}
+                    <div className="admin-box">
+                      <div className="admin-box-label">🛡️ Acción de admin</div>
+                      <div className="of-set" style={{ margin:0 }}>
+                        {m.cerrado ? (
+                          <button className="btnmini" onClick={() => reopenMatch(m.id)}>Reabrir partido</button>
+                        ) : (
+                          <button className="btnmini gold" onClick={() => submitResult(m)} disabled={isSubmitting}>
+                            {isSubmitting ? 'Guardando...' : 'Registrar resultado oficial'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )
               })}
-              <div className="lockmsg">Al registrar el resultado, el partido se cierra y se calculan los puntos.</div>
+              <div className="lockmsg" style={{ marginTop:8 }}>
+                Al registrar el resultado, el partido se cierra y se calculan los puntos automáticamente.
+              </div>
             </div>
           )}
 
           {/* ---- TAB: Reglas ---- */}
           {activeTab === 'rules' && (
             <div>
+              {/* Alcance de la polla */}
+              <div className="acard">
+                <div className="h">Alcance de la polla</div>
+                <div className="d" style={{ marginBottom:10 }}>
+                  Define sobre qué partidos del Mundial aplica esta polla. Se puede cambiar mientras esté abierta.
+                </div>
+                {ALCANCE_OPTS.map(o => (
+                  <div key={o.id} className={`scope-opt ${alcanceOp === o.id ? 'on' : ''}`}
+                    onClick={() => setAlcanceOp(o.id)}>
+                    <div className="sico">{o.ico}</div>
+                    <div className="sinfo">
+                      <div className="stitle">{o.title}</div>
+                      <div className="sdesc">{o.desc}</div>
+                    </div>
+                    <div className="scheck" />
+                  </div>
+                ))}
+
+                {/* Selección manual de partidos */}
+                {alcanceOp === 'seleccion' && (
+                  <div style={{ marginTop:12 }}>
+                    <div style={{ fontSize:10, color:'var(--gold)', fontWeight:700, textTransform:'uppercase',
+                      letterSpacing:1, marginBottom:8 }}>
+                      Elegí los partidos ({selectedMatchIds.length} seleccionados)
+                    </div>
+                    {/* Group stage */}
+                    {matches.some(m => isGrupo(m.fase)) && (
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontSize:9, color:'var(--muted)', fontWeight:700, textTransform:'uppercase',
+                          letterSpacing:1, marginBottom:4 }}>Fase de Grupos</div>
+                        {matches.filter(m => isGrupo(m.fase)).map(m => (
+                          <label key={m.id} style={{ display:'flex', alignItems:'center', gap:8,
+                            padding:'6px 8px', borderRadius:8, cursor:'pointer',
+                            background: selectedMatchIds.includes(m.id) ? 'rgba(255,194,75,.07)' : 'transparent',
+                            marginBottom:2 }}>
+                            <input type="checkbox" checked={selectedMatchIds.includes(m.id)}
+                              onChange={() => toggleMatchSelection(m.id)}
+                              style={{ accentColor:'var(--gold)', width:14, height:14 }} />
+                            <span style={{ fontSize:11 }}>
+                              {m.flag_local} {m.equipo_local} vs {m.equipo_visitante} {m.flag_visitante}
+                            </span>
+                            <span style={{ fontSize:9, color:'var(--muted)', marginLeft:'auto' }}>{m.fecha}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {/* Knockout */}
+                    {matches.some(m => !isGrupo(m.fase)) && (
+                      <div>
+                        <div style={{ fontSize:9, color:'var(--muted)', fontWeight:700, textTransform:'uppercase',
+                          letterSpacing:1, marginBottom:4 }}>Eliminatorias</div>
+                        {matches.filter(m => !isGrupo(m.fase)).map(m => (
+                          <label key={m.id} style={{ display:'flex', alignItems:'center', gap:8,
+                            padding:'6px 8px', borderRadius:8, cursor:'pointer',
+                            background: selectedMatchIds.includes(m.id) ? 'rgba(255,194,75,.07)' : 'transparent',
+                            marginBottom:2 }}>
+                            <input type="checkbox" checked={selectedMatchIds.includes(m.id)}
+                              onChange={() => toggleMatchSelection(m.id)}
+                              style={{ accentColor:'var(--gold)', width:14, height:14 }} />
+                            <span style={{ fontSize:11 }}>
+                              {m.flag_local} {m.equipo_local} vs {m.equipo_visitante} {m.flag_visitante}
+                            </span>
+                            <span style={{ fontSize:9, color:'var(--muted)', marginLeft:'auto' }}>{m.fecha}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {matches.length === 0 && (
+                      <div style={{ fontSize:11, color:'var(--muted)', textAlign:'center', padding:12 }}>
+                        Los partidos se cargan cuando estén disponibles.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="acard">
                 <div className="h">Puntuación</div>
-                <div className="d">Cuántos puntos vale cada acierto.</div>
+                <div className="d">Cuántos puntos vale cada acierto. Visible para todos los miembros.</div>
                 <div className="rulegrid" style={{ marginTop:12 }}>
                   <div className="field">
                     <label>Exacto</label>
@@ -365,9 +466,12 @@ export default function PollAdmin() {
                 )}
               </div>
 
-              <button className="save gold" onClick={saveRules} disabled={savingRules || sumaP !== 100}>
-                {savingRules ? 'Guardando...' : 'Guardar reglas'}
-              </button>
+              <div className="admin-box" style={{ marginBottom:12 }}>
+                <div className="admin-box-label">🛡️ Acción de admin</div>
+                <button className="save gold" onClick={saveRules} disabled={savingRules || sumaP !== 100} style={{ margin:0 }}>
+                  {savingRules ? 'Guardando...' : 'Guardar reglas'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -379,35 +483,69 @@ export default function PollAdmin() {
                   Participantes
                   <span className="badge open">{members.length} total</span>
                 </div>
-                <div className="d">Solo los que pagaron compiten por el bote ({pagados.length} pagados).</div>
+                <div className="d">
+                  Solo los que pagaron compiten por el bote ({pagados.length} pagados · {members.length - pagados.length} pendientes).
+                </div>
+                <div style={{ marginTop:8 }}>
+                  {members.map((m, i) => {
+                    const isAdminUser = m.user_id === poll.admin_id
+                    const tableRow = tabla.find(r => r.user_id === m.user_id)
+                    return (
+                      <div key={m.user_id} className="prow">
+                        <div className="av" style={{ background: AVCOLS[i % AVCOLS.length] }}>
+                          {(m.profiles?.nombre?.[0] || '?').toUpperCase()}
+                        </div>
+                        <div className="pinfo">
+                          <div className="pn" style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                            {m.profiles?.nombre || '—'}
+                            {m.user_id === session?.user.id ? <span style={{ color:'var(--muted)', fontSize:10 }}>· tú</span> : ''}
+                            {isAdminUser && <span className="admin-chip" style={{ fontSize:8, padding:'2px 6px' }}>admin</span>}
+                          </div>
+                          <div className="pmeta">
+                            {tableRow?.puntos ?? 0} pts · se unió {new Date(m.joined_at).toLocaleDateString('es-CO')}
+                          </div>
+                        </div>
+                        <div className="admin-box" style={{ margin:0, padding:'4px 8px', display:'flex', alignItems:'center' }}>
+                          <button
+                            className={`toggle ${m.pagado ? 'paid' : 'unpaid'}`}
+                            onClick={() => togglePagado(m)}
+                          >
+                            {m.pagado ? 'Pagó ✓' : 'Pendiente'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="scoring">
+                <span className="ttl">Código de invitación</span>
+                Comparte este código para que otros se unan:{' '}
+                <b style={{ fontFamily:"'Anton',sans-serif", fontSize:16, letterSpacing:3 }}>{poll.codigo}</b>
+              </div>
+
+              {/* Activity summary */}
+              <div className="acard" style={{ marginTop:10 }}>
+                <div className="h">Resumen de actividad</div>
                 <div style={{ marginTop:8 }}>
                   {members.map((m, i) => (
-                    <div key={m.user_id} className="prow">
-                      <div className="av" style={{ background: AVCOLS[i % AVCOLS.length] }}>
-                        {(m.profiles?.nombre?.[0] || '?').toUpperCase()}
-                      </div>
-                      <div className="pinfo">
-                        <div className="pn">
-                          {m.profiles?.nombre || '—'}
-                          {m.user_id === session?.user.id ? ' · tú' : ''}
-                        </div>
-                        <div className="pmeta">
-                          {tabla.find(r => r.user_id === m.user_id)?.puntos ?? 0} pts · se unió {new Date(m.joined_at).toLocaleDateString('es-CO')}
-                        </div>
-                      </div>
-                      <button
-                        className={`toggle ${m.pagado ? 'paid' : 'unpaid'}`}
-                        onClick={() => togglePagado(m)}
-                      >
-                        {m.pagado ? 'Pagó ✓' : 'Pendiente'}
-                      </button>
+                    <div key={m.user_id} style={{ display:'flex', justifyContent:'space-between',
+                      padding:'6px 0', borderBottom:'1px solid var(--line)', fontSize:11 }}>
+                      <span style={{ color:'var(--muted)' }}>
+                        {(m.profiles?.nombre?.[0] || '?').toUpperCase()}{' '}
+                        <b style={{ color:'var(--txt)' }}>{m.profiles?.nombre || '—'}</b>
+                      </span>
+                      <span style={{ color: m.pagado ? 'var(--win)' : 'var(--lose)', fontWeight:700 }}>
+                        {m.pagado ? '✓ Pagó' : '⏳ Pendiente'}
+                        {' · '}
+                        <span style={{ color:'var(--muted)', fontWeight:400 }}>
+                          {new Date(m.joined_at).toLocaleDateString('es-CO', { day:'numeric', month:'short' })}
+                        </span>
+                      </span>
                     </div>
                   ))}
                 </div>
-              </div>
-              <div className="scoring">
-                <span className="ttl">Código de invitación</span>
-                Comparte este código para que otros se unan: <b style={{ fontFamily:"'Anton',sans-serif", fontSize:16, letterSpacing:2 }}>{poll.codigo}</b>
               </div>
             </div>
           )}
@@ -453,10 +591,15 @@ export default function PollAdmin() {
                     </div>
                   )}
 
-                  <button className="save gold" onClick={cerrarPolla} disabled={closing || pagados.length === 0}>
-                    {closing ? 'Cerrando...' : 'Cerrar polla y repartir el bote'}
-                  </button>
-                  <div className="lockmsg">Cerrar bloquea todos los pronósticos y confirma a los ganadores.</div>
+                  <div className="admin-box" style={{ marginBottom:8 }}>
+                    <div className="admin-box-label">🛡️ Acción de admin · irreversible</div>
+                    <button className="save gold" onClick={cerrarPolla} disabled={closing || pagados.length === 0} style={{ margin:0 }}>
+                      {closing ? 'Cerrando...' : 'Cerrar polla y repartir el bote'}
+                    </button>
+                    <div className="lockmsg" style={{ marginTop:6 }}>
+                      Cerrar bloquea todas las apuestas y confirma a los ganadores definitivamente.
+                    </div>
+                  </div>
                 </>
               ) : (
                 <>
@@ -483,7 +626,10 @@ export default function PollAdmin() {
                     ))}
                   </div>
 
-                  <button className="save ghost" onClick={reabrirPolla}>Reabrir polla</button>
+                  <div className="admin-box" style={{ marginBottom:8 }}>
+                    <div className="admin-box-label">🛡️ Acción de admin</div>
+                    <button className="save ghost" onClick={reabrirPolla} style={{ margin:0 }}>Reabrir polla</button>
+                  </div>
                 </>
               )}
             </div>

@@ -15,6 +15,9 @@ const ELIM = [
   { ronda:'Final', fecha:'19 jul', sede:'Nueva Jersey', ico:'🏆' },
 ]
 
+type MatchSave = 'idle' | 'saving' | 'saved'
+type MajData = { local: number; draw: number; visitante: number; total: number }
+
 function fmt(n: number) { return Number(n).toFixed(2) }
 
 function calcPoints(
@@ -25,7 +28,7 @@ function calcPoints(
   const rl = match.resultado_local
   const rv = match.resultado_visitante
   if (rl === null || rv === null) return { pts: 0, kind: 'pendiente', tag: 'Pendiente' }
-  if (!pred) return { pts: reglas.fallo, kind: 'miss', tag: 'Sin pronóstico' }
+  if (!pred) return { pts: reglas.fallo, kind: 'miss', tag: 'Sin apuesta' }
   if (pred.local === rl && pred.visitante === rv)
     return { pts: reglas.exacto, kind: 'exact', tag: '¡Exacto!' }
   const so = Math.sign(rl - rv)
@@ -39,6 +42,57 @@ function Toast({ msg }: { msg: string }) {
     <div className={`toast-wrap ${msg ? 'show' : ''}`}>
       <span className="toast-dot" />
       {msg}
+    </div>
+  )
+}
+
+function MajorityModal({
+  match, data, onClose
+}: {
+  match: Partido
+  data: MajData
+  onClose: () => void
+}) {
+  const { local, draw, visitante, total } = data
+  const pctLocal = total ? Math.round(local / total * 100) : 0
+  const pctDraw = total ? Math.round(draw / total * 100) : 0
+  const pctVisit = total ? Math.round(visitante / total * 100) : 0
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="modal-title">Consenso del grupo</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ marginBottom:6, fontSize:13, fontWeight:600 }}>
+          {match.flag_local} {match.equipo_local} vs {match.equipo_visitante} {match.flag_visitante}
+        </div>
+        <div style={{ fontSize:10, color:'var(--muted)', marginBottom:14 }}>
+          {total} participante{total !== 1 ? 's' : ''} registraron apuesta
+        </div>
+
+        {[
+          { label: `${match.equipo_local} gana`, pct: pctLocal, count: local, color: 'var(--lime)' },
+          { label: 'Empate', pct: pctDraw, count: draw, color: 'var(--gold)' },
+          { label: `${match.equipo_visitante} gana`, pct: pctVisit, count: visitante, color: 'var(--orange)' },
+        ].map(row => (
+          <div key={row.label} className="maj-row">
+            <div className="maj-row-head">
+              <span style={{ fontSize:11 }}>{row.label}</span>
+              <span style={{ fontSize:11, color: row.color, fontWeight:700 }}>{row.pct}% ({row.count})</span>
+            </div>
+            <div className="maj-bar-bg">
+              <div className="maj-bar-fill" style={{ width: `${row.pct}%`, background: row.color }} />
+            </div>
+          </div>
+        ))}
+
+        <div style={{ marginTop:14, fontSize:11, color:'var(--muted)', textAlign:'center' }}>
+          Resultado oficial: <b style={{ color:'var(--txt)' }}>
+            {match.resultado_local}–{match.resultado_visitante}
+          </b>
+        </div>
+      </div>
     </div>
   )
 }
@@ -60,6 +114,16 @@ export default function PollPlayer() {
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saved'>('idle')
   const [toast, setToast] = useState('')
+
+  // Per-match save state
+  const [matchSaveState, setMatchSaveState] = useState<Record<string, MatchSave>>({})
+  // Admin display name
+  const [adminName, setAdminName] = useState('')
+  // Majority vote data (only for closed matches)
+  const [majority, setMajority] = useState<Record<string, MajData>>({})
+  const [majorityModal, setMajorityModal] = useState<string | null>(null)
+  // Collapsible rules
+  const [showRules, setShowRules] = useState(false)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -91,7 +155,8 @@ export default function PollPlayer() {
       supabase.from('poll_members').select('user_id, pagado').eq('poll_id', pollId),
     ])
 
-    setPoll(pollData as Polla | null)
+    const p = pollData as Polla | null
+    setPoll(p)
     const ms = (matchesData || []) as Partido[]
     setMatches(ms)
     setMyMember(memberData as PollMember | null)
@@ -99,15 +164,59 @@ export default function PollPlayer() {
     const pagados = ((membersData || []) as { pagado: boolean }[]).filter(m => m.pagado).length
     setPagadosCount(pagados)
 
+    // Build prediction map
     const predMap: Record<string, { local: number; visitante: number }> = {}
     ms.forEach(m => { predMap[m.id] = { local: 0, visitante: 0 } })
+    const savedPredIds = new Set<string>()
     ;((predsData || []) as { partido_id: string; pred_local: number; pred_visitante: number }[])
-      .forEach(p => { predMap[p.partido_id] = { local: p.pred_local, visitante: p.pred_visitante } })
+      .forEach(pr => {
+        predMap[pr.partido_id] = { local: pr.pred_local, visitante: pr.pred_visitante }
+        savedPredIds.add(pr.partido_id)
+      })
     setPreds(predMap)
+
+    // Init per-match save state: saved if it's already in DB
+    const initSaveState: Record<string, MatchSave> = {}
+    ms.forEach(m => { initSaveState[m.id] = savedPredIds.has(m.id) ? 'saved' : 'idle' })
+    setMatchSaveState(initSaveState)
+
+    // Load admin name
+    if (p?.admin_id) {
+      const { data: adminProfile } = await supabase
+        .from('profiles')
+        .select('nombre')
+        .eq('id', p.admin_id)
+        .single()
+      setAdminName((adminProfile as { nombre: string } | null)?.nombre || '')
+    }
 
     await loadTabla()
 
-    if ((pollData as Polla | null)?.estado === 'cerrada') {
+    // Load majority vote data for closed matches
+    const closedIds = ms.filter(m => m.cerrado).map(m => m.id)
+    if (closedIds.length > 0) {
+      const { data: allPredsData } = await supabase
+        .from('predicciones')
+        .select('partido_id, pred_local, pred_visitante')
+        .eq('poll_id', pollId)
+        .in('partido_id', closedIds)
+
+      const majMap: Record<string, MajData> = {}
+      closedIds.forEach(cid => {
+        const matchPreds = ((allPredsData || []) as { partido_id: string; pred_local: number; pred_visitante: number }[])
+          .filter(pr => pr.partido_id === cid)
+        let local = 0, draw = 0, visitante = 0
+        matchPreds.forEach(pr => {
+          if (pr.pred_local > pr.pred_visitante) local++
+          else if (pr.pred_local < pr.pred_visitante) visitante++
+          else draw++
+        })
+        majMap[cid] = { local, draw, visitante, total: matchPreds.length }
+      })
+      setMajority(majMap)
+    }
+
+    if (p?.estado === 'cerrada') {
       const { data: gData } = await supabase
         .from('ganadores')
         .select('*, profiles(nombre)')
@@ -124,10 +233,31 @@ export default function PollPlayer() {
   const updatePred = (matchId: string, side: 'local' | 'visitante', delta: number) => {
     setPreds(prev => {
       const cur = prev[matchId] || { local: 0, visitante: 0 }
-      const next = Math.max(0, cur[side] + delta)
-      return { ...prev, [matchId]: { ...cur, [side]: next } }
+      return { ...prev, [matchId]: { ...cur, [side]: Math.max(0, cur[side] + delta) } }
     })
+    setMatchSaveState(prev => ({ ...prev, [matchId]: 'idle' }))
     setSaveState('idle')
+  }
+
+  const saveSinglePred = async (matchId: string) => {
+    if (!session || !pollId) return
+    setMatchSaveState(prev => ({ ...prev, [matchId]: 'saving' }))
+    const { error } = await supabase
+      .from('predicciones')
+      .upsert({
+        poll_id: pollId,
+        user_id: session.user.id,
+        partido_id: matchId,
+        pred_local: preds[matchId]?.local ?? 0,
+        pred_visitante: preds[matchId]?.visitante ?? 0,
+      }, { onConflict: 'poll_id,user_id,partido_id' })
+    if (error) {
+      setMatchSaveState(prev => ({ ...prev, [matchId]: 'idle' }))
+      showToast('Error al guardar: ' + error.message)
+    } else {
+      setMatchSaveState(prev => ({ ...prev, [matchId]: 'saved' }))
+      showToast('Apuesta guardada ✓')
+    }
   }
 
   const savePreds = async () => {
@@ -144,14 +274,39 @@ export default function PollPlayer() {
     const { error } = await supabase
       .from('predicciones')
       .upsert(upsertData, { onConflict: 'poll_id,user_id,partido_id' })
-    setSaving(false)
+
     if (error) {
-      showToast('Error: ' + error.message)
-    } else {
-      setSaveState('saved')
-      showToast('Pronósticos guardados ✓')
-      setTimeout(() => setSaveState('idle'), 3000)
+      setSaving(false)
+      showToast('Error al guardar: ' + error.message)
+      return
     }
+
+    // Reload from DB to verify persistence
+    const { data: savedData } = await supabase
+      .from('predicciones')
+      .select('partido_id, pred_local, pred_visitante')
+      .eq('poll_id', pollId)
+      .eq('user_id', session.user.id)
+
+    if (savedData) {
+      const predMap = { ...preds }
+      const savedIds = new Set<string>()
+      ;(savedData as { partido_id: string; pred_local: number; pred_visitante: number }[]).forEach(pr => {
+        predMap[pr.partido_id] = { local: pr.pred_local, visitante: pr.pred_visitante }
+        savedIds.add(pr.partido_id)
+      })
+      setPreds(predMap)
+      setMatchSaveState(prev => {
+        const next = { ...prev }
+        openMatches.forEach(m => { next[m.id] = savedIds.has(m.id) ? 'saved' : 'idle' })
+        return next
+      })
+    }
+
+    setSaving(false)
+    setSaveState('saved')
+    showToast('Todas las apuestas guardadas ✓')
+    setTimeout(() => setSaveState('idle'), 3000)
   }
 
   if (loading) return (
@@ -186,12 +341,22 @@ export default function PollPlayer() {
   const nPremios = premios.filter(p => p > 0).length
   const isAdmin = poll.admin_id === session?.user.id
 
-  const openMatches = matches.filter(m => !m.cerrado && poll.estado === 'abierta')
-  const closedMatches = matches.filter(m => m.cerrado)
+  // Filtrar partidos según el alcance configurado
+  const alcance = poll.reglas.alcance ?? 'mundial'
+  const inScope = (m: Partido): boolean => {
+    if (alcance === 'mundial') return true
+    if (alcance === 'grupos') return /grupo/i.test(m.fase)
+    if (alcance === 'eliminatorias') return !/grupo/i.test(m.fase)
+    if (alcance === 'seleccion') return (poll.reglas.partidos_seleccionados ?? []).includes(m.id)
+    return true
+  }
+  const scopedMatches = matches.filter(inScope)
+  const openMatches = scopedMatches.filter(m => !m.cerrado && poll.estado === 'abierta')
+  const closedMatches = scopedMatches.filter(m => m.cerrado)
 
   const predLabel = (matchId: string, match: Partido) => {
     const pr = preds[matchId]
-    if (!pr) return 'Sin pronóstico'
+    if (!pr) return 'Sin apuesta'
     if (pr.local > pr.visitante) return `${match.equipo_local} gana`
     if (pr.visitante > pr.local) return `${match.equipo_visitante} gana`
     return 'Empate'
@@ -204,7 +369,7 @@ export default function PollPlayer() {
       return { cls: 'hook lose', txt: 'Polla cerrada. Esta vez no alcanzó el podio.' }
     }
     if (!closedMatches.length)
-      return { cls: 'hook', txt: 'El Mundial arranca el 11 de junio. ¡Haz y firma tus pronósticos!' }
+      return { cls: 'hook', txt: 'El Mundial arranca el 11 de junio. ¡Haz y firma tus apuestas!' }
     if (myPos > 0 && myPos <= nPremios)
       return { cls: 'hook', txt: `Si la polla cerrara hoy, ganarías ${fmt(bote * premios[myPos - 1] / 100)} ${poll.moneda}` }
     if (myPos > 0) {
@@ -216,6 +381,7 @@ export default function PollPlayer() {
   }
 
   const hook = hookMsg()
+  const majorityMatch = majorityModal ? closedMatches.find(m => m.id === majorityModal) : null
 
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'18px 12px' }}>
@@ -245,6 +411,14 @@ export default function PollPlayer() {
             <div className="cap">
               Bote total · {pagadosCount} pagados · {fmt(poll.inscripcion)} {poll.moneda} c/u
             </div>
+            {(adminName || alcance !== 'mundial') && (
+              <div style={{ marginTop:6, display:'flex', gap:6, flexWrap:'wrap' }}>
+                {adminName && <span className="admin-chip">🛡️ Organiza: {adminName}</span>}
+                {alcance === 'grupos' && <span className="admin-chip" style={{ background:'rgba(43,107,255,.10)', borderColor:'rgba(43,107,255,.25)', color:'var(--blue)' }}>🏟️ Solo grupos</span>}
+                {alcance === 'eliminatorias' && <span className="admin-chip" style={{ background:'rgba(255,138,61,.10)', borderColor:'rgba(255,138,61,.25)', color:'var(--orange)' }}>⚡ Solo eliminatorias</span>}
+                {alcance === 'seleccion' && <span className="admin-chip" style={{ background:'rgba(255,138,61,.10)', borderColor:'rgba(255,138,61,.25)', color:'var(--orange)' }}>🎯 Partidos elegidos</span>}
+              </div>
+            )}
             <div className="rowx">
               <div className="pill"><div className="v">{pagadosCount}</div><div className="k">Participan</div></div>
               <div className="pill"><div className="v">{myPos > 0 ? `${myPos}°` : '—'}</div><div className="k">Tu puesto</div></div>
@@ -285,12 +459,12 @@ export default function PollPlayer() {
 
           {/* Tabs */}
           <div className="tabs">
-            <div className={`tab ${activeTab === 'play' ? 'on' : ''}`} onClick={() => setActiveTab('play')}>Por jugar</div>
+            <div className={`tab ${activeTab === 'play' ? 'on' : ''}`} onClick={() => setActiveTab('play')}>Apuestas</div>
             <div className={`tab ${activeTab === 'results' ? 'on' : ''}`} onClick={() => setActiveTab('results')}>Resultados</div>
             <div className={`tab ${activeTab === 'board' ? 'on' : ''}`} onClick={() => setActiveTab('board')}>Tabla</div>
           </div>
 
-          {/* ---- TAB: Por jugar ---- */}
+          {/* ---- TAB: Apuestas ---- */}
           {activeTab === 'play' && (
             <div>
               {!myMember.pagado ? (
@@ -298,7 +472,7 @@ export default function PollPlayer() {
                   <div style={{ fontSize:36, marginBottom:10 }}>⏳</div>
                   <div className="h" style={{ justifyContent:'center' }}>Inscripción pendiente</div>
                   <div className="d" style={{ marginTop:6, lineHeight:1.6 }}>
-                    El admin debe confirmar tu pago para que puedas hacer pronósticos.
+                    El admin debe confirmar tu pago para que puedas registrar apuestas.
                     <br />Una vez que te active, podrás jugar todos los partidos abiertos.
                   </div>
                 </div>
@@ -307,56 +481,89 @@ export default function PollPlayer() {
                   <div className="d" style={{ textAlign:'center' }}>
                     {poll.estado === 'cerrada'
                       ? 'La polla está cerrada. Revisa la tabla final.'
-                      : 'No hay partidos abiertos para pronosticar.'}
+                      : 'No hay partidos abiertos para apostar.'}
                   </div>
                 </div>
               ) : (
                 <>
-                  {openMatches.map(m => (
-                    <div key={m.id} className="match">
-                      <div className="when">
-                        <span>{m.fecha} · {m.fase}</span>
-                        {m.destacado
-                          ? <span className="star">⭐ Colombia</span>
-                          : <span style={{ fontSize:9, color:'var(--muted)' }}>📌 pronóstico</span>}
+                  {openMatches.map(m => {
+                    const ms = matchSaveState[m.id] || 'idle'
+                    return (
+                      <div key={m.id} className="match">
+                        <div className="when">
+                          <span>{m.fecha} · {m.fase}</span>
+                          {m.destacado
+                            ? <span className="star">⭐ Colombia</span>
+                            : <span style={{ fontSize:9, color:'var(--muted)' }}>📌 apuesta</span>}
+                        </div>
+                        <div className="teams">
+                          <div className="team">
+                            <div className="fl">{m.flag_local}</div>
+                            <div className="tn">{m.equipo_local}</div>
+                          </div>
+                          <div className="step">
+                            <button onClick={() => updatePred(m.id, 'local', -1)} disabled={preds[m.id]?.local === 0}>−</button>
+                            <div className="sv">{preds[m.id]?.local ?? 0}</div>
+                            <button onClick={() => updatePred(m.id, 'local', 1)}>+</button>
+                          </div>
+                          <div className="midv">:</div>
+                          <div className="step">
+                            <button onClick={() => updatePred(m.id, 'visitante', -1)} disabled={preds[m.id]?.visitante === 0}>−</button>
+                            <div className="sv">{preds[m.id]?.visitante ?? 0}</div>
+                            <button onClick={() => updatePred(m.id, 'visitante', 1)}>+</button>
+                          </div>
+                          <div className="team">
+                            <div className="fl">{m.flag_visitante}</div>
+                            <div className="tn">{m.equipo_visitante}</div>
+                          </div>
+                        </div>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10 }}>
+                          <div className={`pred ${preds[m.id] ? '' : 'muted'}`} style={{ margin:0 }}>
+                            {predLabel(m.id, m)}
+                          </div>
+                          <button
+                            className={`match-save-mini ${ms}`}
+                            onClick={() => saveSinglePred(m.id)}
+                            disabled={ms === 'saving'}
+                          >
+                            {ms === 'saving' ? '…' : ms === 'saved' ? '✓ Guardada' : 'Guardar'}
+                          </button>
+                        </div>
                       </div>
-                      <div className="teams">
-                        <div className="team">
-                          <div className="fl">{m.flag_local}</div>
-                          <div className="tn">{m.equipo_local}</div>
-                        </div>
-                        <div className="step">
-                          <button onClick={() => updatePred(m.id, 'local', -1)} disabled={preds[m.id]?.local === 0}>−</button>
-                          <div className="sv">{preds[m.id]?.local ?? 0}</div>
-                          <button onClick={() => updatePred(m.id, 'local', 1)}>+</button>
-                        </div>
-                        <div className="midv">:</div>
-                        <div className="step">
-                          <button onClick={() => updatePred(m.id, 'visitante', -1)} disabled={preds[m.id]?.visitante === 0}>−</button>
-                          <div className="sv">{preds[m.id]?.visitante ?? 0}</div>
-                          <button onClick={() => updatePred(m.id, 'visitante', 1)}>+</button>
-                        </div>
-                        <div className="team">
-                          <div className="fl">{m.flag_visitante}</div>
-                          <div className="tn">{m.equipo_visitante}</div>
-                        </div>
-                      </div>
-                      <div className={`pred ${preds[m.id] ? '' : 'muted'}`}>
-                        {predLabel(m.id, m)}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
 
                   <button
                     className={`save ${saveState === 'saved' ? 'done' : ''}`}
                     onClick={savePreds}
                     disabled={saving}
+                    style={{ marginTop:8 }}
                   >
-                    {saving ? 'Guardando...' : saveState === 'saved' ? '✓ Pronósticos guardados' : 'Guardar pronósticos · firmar'}
+                    {saving ? 'Guardando...' : saveState === 'saved' ? '✓ Todas guardadas' : 'Guardar todas las apuestas'}
                   </button>
-                  <div className="lockmsg">🔒 Cada pronóstico se bloquea cuando el admin registra el resultado</div>
+                  <div className="lockmsg">🔒 Cada apuesta se bloquea cuando el admin registra el resultado del partido</div>
                 </>
               )}
+
+              {/* Reglas colapsables */}
+              <div style={{ marginTop:14 }}>
+                <button
+                  onClick={() => setShowRules(v => !v)}
+                  style={{ background:'none', border:'none', color:'var(--muted)', fontSize:11, cursor:'pointer',
+                    display:'flex', alignItems:'center', gap:5, fontWeight:700, letterSpacing:.5, padding:0, textTransform:'uppercase' }}
+                >
+                  {showRules ? '▾' : '▸'} Cómo se puntúa
+                </button>
+                {showRules && (
+                  <div className="scoring" style={{ marginTop:8 }}>
+                    <span className="ttl">Sistema de puntos</span>
+                    ✅ Marcador exacto = <b>{reglas.exacto} pts</b><br />
+                    🟡 Resultado acertado = <b>{reglas.resultado} pts</b><br />
+                    ⚪ Fallo o sin apuesta = <b>{reglas.fallo} pts</b><br /><br />
+                    <b>Empates:</b> más pts → más exactos → más resultados → inscripción más temprana
+                  </div>
+                )}
+              </div>
 
               {/* Fases eliminatorias */}
               <div className="elimwrap">
@@ -386,19 +593,33 @@ export default function PollPlayer() {
                 closedMatches.map(m => {
                   const pr = preds[m.id]
                   const x = calcPoints(pr, m, reglas)
+                  const maj = majority[m.id]
                   return (
-                    <div key={m.id} className="res">
-                      <div className="info">
-                        <div className="ln">
-                          {m.flag_local} {m.equipo_local}
-                          <span className="scorebox">{m.resultado_local}–{m.resultado_visitante}</span>
-                          {m.equipo_visitante} {m.flag_visitante}
+                    <div key={m.id} className="res" style={{ flexDirection:'column', alignItems:'stretch', gap:0 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                        <div className="info">
+                          <div className="ln">
+                            {m.flag_local} {m.equipo_local}
+                            <span className="scorebox">{m.resultado_local}–{m.resultado_visitante}</span>
+                            {m.equipo_visitante} {m.flag_visitante}
+                          </div>
+                          <div className="sub">
+                            Tu apuesta: <b>{pr ? `${pr.local}–${pr.visitante}` : '—'}</b>
+                          </div>
                         </div>
-                        <div className="sub">
-                          Tu pronóstico: <b>{pr ? `${pr.local}–${pr.visitante}` : '—'}</b>
-                        </div>
+                        <div className={`pts ${x.kind}`}>+{x.pts}<br /><span style={{ fontSize:8, fontWeight:600 }}>{x.tag}</span></div>
                       </div>
-                      <div className={`pts ${x.kind}`}>+{x.pts}<br /><span style={{ fontSize:8, fontWeight:600 }}>{x.tag}</span></div>
+                      {maj && maj.total > 0 && (
+                        <div style={{ marginTop:8 }}>
+                          <button
+                            className="match-save-mini"
+                            onClick={() => setMajorityModal(m.id)}
+                            style={{ width:'100%', padding:'5px 0' }}
+                          >
+                            📊 Ver cómo apostó el grupo ({maj.total})
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )
                 })
@@ -408,7 +629,7 @@ export default function PollPlayer() {
                 <span className="ttl">Cómo se puntúa</span>
                 ✅ Marcador exacto = <b>{reglas.exacto} pts</b><br />
                 🟡 Resultado acertado = <b>{reglas.resultado} pts</b><br />
-                ⚪ Fallo o sin pronóstico = <b>{reglas.fallo} pts</b>
+                ⚪ Fallo o sin apuesta = <b>{reglas.fallo} pts</b>
               </div>
             </div>
           )}
@@ -435,6 +656,7 @@ export default function PollPlayer() {
                         </div>
                         <div className="nm">
                           {row.nombre}{isMe ? ' · tú' : ''}
+                          {row.user_id === poll.admin_id && <span className="admin-chip" style={{ fontSize:8, padding:'2px 6px', marginLeft:4 }}>admin</span>}
                           {inPodium && <small>· podio</small>}
                           <small>{row.exactos} exactos · {row.resultados} resultados</small>
                         </div>
@@ -455,6 +677,15 @@ export default function PollPlayer() {
 
         <Toast msg={toast} />
       </div>
+
+      {/* Majority vote modal */}
+      {majorityModal && majorityMatch && majority[majorityModal] && (
+        <MajorityModal
+          match={majorityMatch}
+          data={majority[majorityModal]}
+          onClose={() => setMajorityModal(null)}
+        />
+      )}
     </div>
   )
 }

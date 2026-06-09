@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Auth from './pages/Auth'
 import Pollas from './pages/Pollas'
@@ -16,6 +16,18 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// Wrappers con key=id para forzar desmontaje completo al cambiar de polla.
+// Sin esto, React reutiliza la misma instancia y el estado de la polla anterior
+// (predicciones, tabla, etc.) persiste hasta que la nueva carga termina.
+function PlayerWrapper() {
+  const { id } = useParams<{ id: string }>()
+  return <PollPlayer key={id} />
+}
+function AdminWrapper() {
+  const { id } = useParams<{ id: string }>()
+  return <PollAdmin key={id} />
+}
+
 function AppRoutes() {
   const { session, loading } = useAuth()
   if (loading) return (
@@ -29,8 +41,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/auth" element={session ? <Navigate to="/pollas" /> : <Auth />} />
       <Route path="/pollas" element={<PrivateRoute><Pollas /></PrivateRoute>} />
-      <Route path="/pollas/:id" element={<PrivateRoute><PollPlayer /></PrivateRoute>} />
-      <Route path="/pollas/:id/admin" element={<PrivateRoute><PollAdmin /></PrivateRoute>} />
+      <Route path="/pollas/:id" element={<PrivateRoute><PlayerWrapper /></PrivateRoute>} />
+      <Route path="/pollas/:id/admin" element={<PrivateRoute><AdminWrapper /></PrivateRoute>} />
       <Route path="*" element={<Navigate to={session ? '/pollas' : '/auth'} />} />
     </Routes>
   )
