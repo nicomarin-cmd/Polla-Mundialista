@@ -164,11 +164,12 @@ export default function PollPlayer() {
     const pagados = ((membersData || []) as { pagado: boolean }[]).filter(m => m.pagado).length
     setPagadosCount(pagados)
 
-    // Build prediction map
+    // Solo cargamos predicciones reales del usuario actual — sin pre-inicializar a 0-0.
+    // Si un partido no tiene entrada en el mapa → el usuario no ha apostado todavía.
     const predMap: Record<string, { local: number; visitante: number }> = {}
-    ms.forEach(m => { predMap[m.id] = { local: 0, visitante: 0 } })
     const savedPredIds = new Set<string>()
-    ;((predsData || []) as { partido_id: string; pred_local: number; pred_visitante: number }[])
+    ;((predsData || []) as { partido_id: string; pred_local: number; pred_visitante: number; user_id?: string }[])
+      .filter(pr => !pr.user_id || pr.user_id === userId)   // seguridad: solo del usuario actual
       .forEach(pr => {
         predMap[pr.partido_id] = { local: pr.pred_local, visitante: pr.pred_visitante }
         savedPredIds.add(pr.partido_id)
@@ -356,7 +357,7 @@ export default function PollPlayer() {
 
   const predLabel = (matchId: string, match: Partido) => {
     const pr = preds[matchId]
-    if (!pr) return 'Sin apuesta'
+    if (!pr) return 'Sin apuesta aún'
     if (pr.local > pr.visitante) return `${match.equipo_local} gana`
     if (pr.visitante > pr.local) return `${match.equipo_visitante} gana`
     return 'Empate'
@@ -502,13 +503,13 @@ export default function PollPlayer() {
                             <div className="tn">{m.equipo_local}</div>
                           </div>
                           <div className="step">
-                            <button onClick={() => updatePred(m.id, 'local', -1)} disabled={preds[m.id]?.local === 0}>−</button>
+                            <button onClick={() => updatePred(m.id, 'local', -1)} disabled={(preds[m.id]?.local ?? 0) === 0}>−</button>
                             <div className="sv">{preds[m.id]?.local ?? 0}</div>
                             <button onClick={() => updatePred(m.id, 'local', 1)}>+</button>
                           </div>
                           <div className="midv">:</div>
                           <div className="step">
-                            <button onClick={() => updatePred(m.id, 'visitante', -1)} disabled={preds[m.id]?.visitante === 0}>−</button>
+                            <button onClick={() => updatePred(m.id, 'visitante', -1)} disabled={(preds[m.id]?.visitante ?? 0) === 0}>−</button>
                             <div className="sv">{preds[m.id]?.visitante ?? 0}</div>
                             <button onClick={() => updatePred(m.id, 'visitante', 1)}>+</button>
                           </div>
