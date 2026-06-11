@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
 import { isCryptoMoneda, celoscanTx, monedaToToken } from '../lib/celoTokens'
-import type { Polla, Partido, PollMemberWithProfile, TablaRow, Alcance, PollPayment } from '../types'
+import type { Polla, Partido, PollMemberWithProfile, TablaRow, Alcance, PollPayment, PollResultado } from '../types'
 
 interface WinnerDist {
   user_id: string
@@ -142,14 +142,26 @@ export default function PollAdmin() {
       { data: pollData },
       { data: matchesData },
       { data: membersData },
+      { data: resultadosData },
     ] = await Promise.all([
       supabase.from('pollas').select('*').eq('id', pollId).single(),
       supabase.from('partidos').select('*').order('orden'),
       supabase.from('poll_members').select('*, profiles(nombre)').eq('poll_id', pollId).order('joined_at'),
+      supabase.from('poll_resultados').select('*').eq('poll_id', pollId),
     ])
 
     const p = pollData as Polla | null
-    const ms = (matchesData || []) as Partido[]
+
+    // Mezclar partidos globales con resultados específicos de esta polla
+    const resMap: Record<string, PollResultado> = {}
+    ;(resultadosData || []).forEach((r: PollResultado) => { resMap[r.partido_id] = r })
+    const ms = ((matchesData || []) as Partido[]).map(m => ({
+      ...m,
+      resultado_local:     resMap[m.id]?.resultado_local     ?? null,
+      resultado_visitante: resMap[m.id]?.resultado_visitante ?? null,
+      cerrado:             resMap[m.id]?.cerrado             ?? false,
+    }))
+
     setPoll(p)
     setMatches(ms)
     setMembers((membersData || []) as PollMemberWithProfile[])
@@ -245,11 +257,14 @@ export default function PollAdmin() {
     const score = matchScores[match.id]
     if (!score) return
     setSubmitting(match.id)
-    const { error } = await supabase.from('partidos').update({
-      resultado_local: score.local,
+    // Guardar en poll_resultados (por polla), NO en partidos (global)
+    const { error } = await supabase.from('poll_resultados').upsert({
+      poll_id:             pollId,
+      partido_id:          match.id,
+      resultado_local:     score.local,
       resultado_visitante: score.visitante,
-      cerrado: true,
-    }).eq('id', match.id)
+      cerrado:             true,
+    }, { onConflict: 'poll_id,partido_id' })
     setSubmitting(null)
     if (error) { showToast('Error: ' + error.message); return }
     showToast(`${match.equipo_local} ${score.local}–${score.visitante} ${match.equipo_visitante} · cerrado`)
@@ -257,11 +272,13 @@ export default function PollAdmin() {
   }
 
   const reopenMatch = async (matchId: string) => {
-    const { error } = await supabase.from('partidos').update({
-      resultado_local: null,
+    const { error } = await supabase.from('poll_resultados').upsert({
+      poll_id:             pollId,
+      partido_id:          matchId,
+      resultado_local:     null,
       resultado_visitante: null,
-      cerrado: false,
-    }).eq('id', matchId)
+      cerrado:             false,
+    }, { onConflict: 'poll_id,partido_id' })
     if (error) { showToast('Error: ' + error.message); return }
     showToast('Partido reabierto')
     await loadAll()

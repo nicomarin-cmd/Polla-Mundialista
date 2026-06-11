@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
 import { PaymentButton } from '../components/PaymentButton'
 import { isCryptoMoneda } from '../lib/celoTokens'
-import type { Polla, Partido, PollMember, TablaRow, GanadorWithProfile } from '../types'
+import type { Polla, Partido, PollMember, TablaRow, GanadorWithProfile, PollResultado } from '../types'
 
 const AVCOLS = ['#ffc24b','#d7ff3e','#37e29a','#ff8a3d','#7aa2ff','#ff5a5f','#b48bff','#4be0d6','#ff9ec4','#9bd35a']
 const MEDALS = ['🥇','🥈','🥉']
@@ -150,17 +150,30 @@ export default function PollPlayer() {
       { data: memberData },
       { data: predsData },
       { data: membersData },
+      { data: resultadosData },
     ] = await Promise.all([
       supabase.from('pollas').select('*').eq('id', pollId).single(),
       supabase.from('partidos').select('*').order('orden'),
       supabase.from('poll_members').select('*').eq('poll_id', pollId).eq('user_id', userId).single(),
       supabase.from('predicciones').select('*').eq('poll_id', pollId).eq('user_id', userId),
       supabase.from('poll_members').select('user_id, pagado').eq('poll_id', pollId),
+      supabase.from('poll_resultados').select('*').eq('poll_id', pollId),
     ])
 
     const p = pollData as Polla | null
     setPoll(p)
-    const ms = (matchesData || []) as Partido[]
+
+    // Mezclar partidos globales con resultados específicos de esta polla
+    const resMap: Record<string, PollResultado> = {}
+    ;(resultadosData || []).forEach((r: PollResultado) => { resMap[r.partido_id] = r })
+    const now = new Date()
+    const ms = ((matchesData || []) as Partido[]).map(m => ({
+      ...m,
+      resultado_local:     resMap[m.id]?.resultado_local     ?? null,
+      resultado_visitante: resMap[m.id]?.resultado_visitante ?? null,
+      // Cerrado si: admin lo cerró EN ESTA POLLA o la hora de inicio ya pasó
+      cerrado: resMap[m.id]?.cerrado ?? (m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false),
+    }))
     setMatches(ms)
     setMyMember(memberData as PollMember | null)
 

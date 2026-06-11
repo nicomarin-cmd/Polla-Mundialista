@@ -31,6 +31,7 @@ export interface Partido {
   orden: number
   fase: string
   fecha: string
+  fecha_inicio: string | null   // timestamptz — auto-cierra apuestas al llegar
   equipo_local: string
   equipo_visitante: string
   flag_local: string
@@ -39,6 +40,15 @@ export interface Partido {
   resultado_visitante: number | null
   cerrado: boolean
   destacado: boolean
+}
+
+export interface PollResultado {
+  id?: string
+  poll_id: string
+  partido_id: string
+  resultado_local: number | null
+  resultado_visitante: number | null
+  cerrado: boolean
 }
 
 export interface Prediccion {
