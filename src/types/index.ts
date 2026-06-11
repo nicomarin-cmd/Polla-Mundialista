@@ -14,7 +14,7 @@ export interface Polla {
   admin_id: string
   inscripcion: number
   moneda: string
-  estado: 'abierta' | 'cerrada'
+  estado: 'abierta' | 'cerrada' | 'cancelada'
   reglas: {
     exacto: number
     resultado: number
@@ -79,4 +79,20 @@ export interface Ganador {
 
 export interface GanadorWithProfile extends Ganador {
   profiles: { nombre: string } | null
+}
+
+export interface PollPayment {
+  id: string
+  poll_id: string
+  user_id: string
+  amount: number
+  token: string
+  chain: string
+  chain_id: number
+  wallet_address: string
+  tx_hash: string | null
+  refund_tx_hash: string | null
+  status: 'pending' | 'confirmed' | 'distributed' | 'refunded' | 'failed'
+  created_at: string
+  updated_at: string
 }

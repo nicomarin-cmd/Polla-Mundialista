@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { WalletButton } from '../components/WalletButton'
+import { PaymentButton } from '../components/PaymentButton'
+import { isCryptoMoneda } from '../lib/celoTokens'
 import type { Polla, Partido, PollMember, TablaRow, GanadorWithProfile } from '../types'
 
 const AVCOLS = ['#ffc24b','#d7ff3e','#37e29a','#ff8a3d','#7aa2ff','#ff5a5f','#b48bff','#4be0d6','#ff9ec4','#9bd35a']
@@ -401,7 +404,10 @@ export default function PollPlayer() {
             </div>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
-            <button className="back-btn" onClick={() => navigate('/pollas')}>← Mis pollas</button>
+            <div style={{ display:'flex', gap:6 }}>
+              <WalletButton />
+              <button className="back-btn" onClick={() => navigate('/pollas')}>← Volver</button>
+            </div>
             {isAdmin && (
               <button className="back-btn" style={{ color:'var(--gold)', borderColor:'rgba(255,194,75,.3)' }}
                 onClick={() => navigate(`/pollas/${pollId}/admin`)}>
@@ -474,9 +480,18 @@ export default function PollPlayer() {
           {activeTab === 'play' && (
             <div>
               {!myMember.pagado && (
-                <div className="hook warn" style={{ marginBottom:12, textAlign:'left', lineHeight:1.5 }}>
-                  ⏳ <b>Inscripción pendiente</b> — el admin debe confirmar tu pago para que tus puntos cuenten hacia el bote. Igual podés hacer tus apuestas ahora.
-                </div>
+                isCryptoMoneda(poll.moneda) ? (
+                  <PaymentButton
+                    pollId={poll.id}
+                    amount={poll.inscripcion}
+                    moneda={poll.moneda}
+                    onSuccess={() => loadAll()}
+                  />
+                ) : (
+                  <div className="hook warn" style={{ marginBottom:12, textAlign:'left', lineHeight:1.5 }}>
+                    ⏳ <b>Inscripción pendiente</b> — el admin debe confirmar tu pago para que tus puntos cuenten hacia el bote. Igual podés hacer tus apuestas ahora.
+                  </div>
+                )
               )}
 
               {scopedMatches.length === 0 ? (

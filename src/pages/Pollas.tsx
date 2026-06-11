@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { WalletButton } from '../components/WalletButton'
+import { isCryptoMoneda } from '../lib/celoTokens'
 import type { Polla, Alcance } from '../types'
 
 function genCodigo() {
@@ -41,6 +43,7 @@ function ScopeSelector({ value, onChange }: { value: Alcance; onChange: (v: Alca
 export default function Pollas() {
   const { session, profile } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [pollas, setPollas] = useState<Polla[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -51,17 +54,29 @@ export default function Pollas() {
   const [alcance, setAlcance] = useState<Alcance>('mundial')
   const [creando, setCreando] = useState(false)
 
-  const [showUnirse, setShowUnirse] = useState(false)
-  const [codigo, setCodigo] = useState('')
+  const joinParam = searchParams.get('join')
+  const [showUnirse, setShowUnirse] = useState(!!joinParam)
+  const [codigo, setCodigo] = useState(joinParam ?? '')
   const [uniendose, setUniendose] = useState(false)
   const [error, setError] = useState('')
 
   const fetchPollas = async () => {
     if (!session) return
     setLoading(true)
+    const { data: memberships } = await supabase
+      .from('poll_members')
+      .select('poll_id')
+      .eq('user_id', session.user.id)
+    const pollIds = (memberships || []).map(m => m.poll_id as string)
+    if (pollIds.length === 0) {
+      setPollas([])
+      setLoading(false)
+      return
+    }
     const { data } = await supabase
       .from('pollas')
       .select('*')
+      .in('id', pollIds)
       .order('created_at', { ascending: false })
     setPollas((data || []) as Polla[])
     setLoading(false)
@@ -168,7 +183,10 @@ export default function Pollas() {
               <small>{profile?.nombre || session?.user.email}</small>
             </div>
           </div>
-          <button className="back-btn" onClick={logout}>Salir</button>
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <WalletButton />
+            <button className="back-btn" onClick={logout}>Salir</button>
+          </div>
         </div>
 
         <div className="body">
@@ -248,18 +266,35 @@ export default function Pollas() {
               <label>Moneda</label>
               <select className="inp" value={moneda} onChange={e => setMoneda(e.target.value)}
                 style={{ cursor:'pointer' }}>
-                <option value="COP">COP — Peso colombiano</option>
-                <option value="USD">USD — Dólar estadounidense</option>
-                <option value="EUR">EUR — Euro</option>
-                <option value="MXN">MXN — Peso mexicano</option>
-                <option value="ARS">ARS — Peso argentino</option>
-                <option value="CLP">CLP — Peso chileno</option>
-                <option value="PEN">PEN — Sol peruano</option>
-                <option value="BRL">BRL — Real brasileño</option>
+                <optgroup label="Monedas fiat (pago manual)">
+                  <option value="COP">COP — Peso colombiano</option>
+                  <option value="USD">USD — Dólar estadounidense</option>
+                  <option value="EUR">EUR — Euro</option>
+                  <option value="MXN">MXN — Peso mexicano</option>
+                  <option value="ARS">ARS — Peso argentino</option>
+                  <option value="CLP">CLP — Peso chileno</option>
+                  <option value="PEN">PEN — Sol peruano</option>
+                  <option value="BRL">BRL — Real brasileño</option>
+                </optgroup>
+                <optgroup label="Cripto en Celo (pago on-chain)">
+                  <option value="USDC-celo">USDC — Celo blockchain (gasless)</option>
+                  <option value="USDT-celo">USDT — Celo blockchain (gasless)</option>
+                  <option value="cUSD">cUSD — Celo Dollar nativo (Mento)</option>
+                </optgroup>
               </select>
+              {isCryptoMoneda(moneda) && (
+                <div style={{ marginTop:6, fontSize:10, color:'var(--lime)', background:'rgba(200,255,60,.08)',
+                  border:'1px solid rgba(200,255,60,.2)', borderRadius:8, padding:'7px 9px', lineHeight:1.5 }}>
+                  {moneda === 'cUSD'
+                    ? 'Los participantes pagarán con cUSD (Celo Dollar de Mento). Requieren CELO para gas de la aprobación.'
+                    : `Los participantes pagarán con ${moneda === 'USDT-celo' ? 'USDT' : 'USDC'} en la red Celo (firma gasless).`
+                  }
+                  {' '}Necesitarán conectar una wallet compatible (MetaMask, Coinbase Wallet, Valora).
+                </div>
+              )}
             </div>
             <div className="field">
-              <label>Inscripción ({moneda})</label>
+              <label>Inscripción ({isCryptoMoneda(moneda) ? (moneda === 'USDT-celo' ? 'USDT' : moneda === 'cUSD' ? 'cUSD' : 'USDC') : moneda})</label>
               <input
                 className="inp"
                 type="number"

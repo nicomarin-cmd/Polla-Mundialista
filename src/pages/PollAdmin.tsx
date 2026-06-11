@@ -2,7 +2,30 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import type { Polla, Partido, PollMemberWithProfile, TablaRow, Alcance } from '../types'
+import { WalletButton } from '../components/WalletButton'
+import { isCryptoMoneda, celoscanTx, monedaToToken } from '../lib/celoTokens'
+import type { Polla, Partido, PollMemberWithProfile, TablaRow, Alcance, PollPayment } from '../types'
+
+interface WinnerDist {
+  user_id: string
+  puesto: number
+  monto: number
+  wallet?: string
+  tx_hash?: string
+  celoscan?: string
+  status: 'sent' | 'pending_wallet' | 'failed'
+  error?: string
+}
+
+interface RefundResult {
+  user_id: string
+  wallet: string
+  amount: number
+  refund_tx_hash?: string
+  celoscan?: string
+  status: 'refunded' | 'failed'
+  error?: string
+}
 
 const ALCANCE_OPTS: { id: Alcance; ico: string; title: string; desc: string }[] = [
   { id: 'mundial',       ico: '🌍', title: 'Todo el Mundial',     desc: 'Todos los partidos: grupos + eliminatorias' },
@@ -12,6 +35,19 @@ const ALCANCE_OPTS: { id: Alcance; ico: string; title: string; desc: string }[] 
 ]
 
 function isGrupo(fase: string) { return /grupo/i.test(fase) }
+
+const EQUIPOS_TOP = new Set([
+  'Brasil','Brazil','Argentina','Francia','France','España','Spain',
+  'Alemania','Germany','Inglaterra','England','Portugal','México','Mexico',
+  'Uruguay','Holanda','Netherlands','Croacia','Croatia','Colombia',
+  'Bélgica','Belgium','Italia','Italy','Japón','Japan','Marruecos','Morocco',
+])
+
+function isFavorito(m: Partido) {
+  return m.destacado || EQUIPOS_TOP.has(m.equipo_local) || EQUIPOS_TOP.has(m.equipo_visitante)
+}
+
+type SelCategory = 'todos' | 'colombia' | 'favoritos' | 'grupos' | 'elim'
 
 const AVCOLS = ['#ffc24b','#d7ff3e','#37e29a','#ff8a3d','#7aa2ff','#ff5a5f','#b48bff','#4be0d6','#ff9ec4','#9bd35a']
 const MEDALS = ['🥇','🥈','🥉']
@@ -54,7 +90,25 @@ export default function PollAdmin() {
   const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([])
   const [savingRules, setSavingRules] = useState(false)
 
+  // Filtros tab Partidos
+  const [matchSearch, setMatchSearch] = useState('')
+  const [matchView, setMatchView] = useState<'todos' | 'pendientes' | 'cerrados'>('todos')
+
+  // Filtros selección manual (Reglas)
+  const [selSearch, setSelSearch] = useState('')
+  const [selCategory, setSelCategory] = useState<SelCategory>('todos')
+
   const [closing, setClosing] = useState(false)
+  // Wallets de los potenciales ganadores (cargadas cuando moneda es cripto)
+  const [winnerWallets, setWinnerWallets] = useState<Record<string, string | null>>({})
+  // Resultado de la distribución cripto (post-cierre)
+  const [distResult, setDistResult] = useState<WinnerDist[]>([])
+  // Cancelación / reembolsos
+  const [cancelling, setCancelling] = useState(false)
+  const [confirmCancel, setConfirmCancel] = useState(false)
+  const [cancelResult, setCancelResult] = useState<RefundResult[]>([])
+  // Pagos cripto registrados (para tabla en Personas)
+  const [payments, setPayments] = useState<PollPayment[]>([])
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -64,7 +118,20 @@ export default function PollAdmin() {
   const loadTabla = useCallback(async () => {
     if (!pollId) return
     const { data } = await supabase.rpc('fn_tabla_posiciones', { p_poll_id: pollId })
-    setTabla((data || []) as TablaRow[])
+    const rows = (data || []) as TablaRow[]
+    setTabla(rows)
+
+    // Cargar wallets de los top-3 cuando la polla es cripto
+    const topIds = rows.slice(0, 3).map(r => r.user_id)
+    if (topIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, wallet_address')
+        .in('id', topIds)
+      const map: Record<string, string | null> = {}
+      ;(profiles ?? []).forEach((p: any) => { map[p.id] = p.wallet_address ?? null })
+      setWinnerWallets(map)
+    }
   }, [pollId])
 
   const loadAll = useCallback(async () => {
@@ -110,6 +177,52 @@ export default function PollAdmin() {
     }
 
     await loadTabla()
+
+    // Si la polla ya estaba cerrada y es cripto, cargar distribución previa
+    if (p && p.estado === 'cerrada' && isCryptoMoneda(p.moneda)) {
+      const { data: winners } = await supabase
+        .from('poll_winners')
+        .select('*')
+        .eq('poll_id', pollId)
+        .order('position')
+      if (winners && winners.length > 0) {
+        setDistResult(winners.map((w: any) => ({
+          user_id: w.user_id,
+          puesto: w.position,
+          monto: Number(w.amount_token),
+          wallet: w.wallet_address || undefined,
+          tx_hash: w.tx_hash || undefined,
+          celoscan: w.tx_hash ? celoscanTx(w.tx_hash) : undefined,
+          status: w.status as WinnerDist['status'],
+        })))
+      }
+    }
+
+    // Cargar pagos cripto (tabla en Personas + reembolsos si cancelada)
+    if (p && isCryptoMoneda(p.moneda)) {
+      const { data: paymentsData } = await supabase
+        .from('poll_payments')
+        .select('*')
+        .eq('poll_id', pollId)
+        .order('created_at')
+      setPayments((paymentsData || []) as PollPayment[])
+
+      // Si ya está cancelada, reconstruir cancelResult desde los pagos
+      if (p.estado === 'cancelada' && paymentsData) {
+        setCancelResult(paymentsData
+          .filter((pp: any) => pp.status === 'refunded' || pp.status === 'failed')
+          .map((pp: any) => ({
+            user_id: pp.user_id,
+            wallet: pp.wallet_address,
+            amount: Number(pp.amount),
+            refund_tx_hash: pp.refund_tx_hash || undefined,
+            celoscan: pp.refund_tx_hash ? celoscanTx(pp.refund_tx_hash) : undefined,
+            status: pp.status as RefundResult['status'],
+          }))
+        )
+      }
+    }
+
     setLoading(false)
   }, [session, pollId, loadTabla])
 
@@ -191,13 +304,42 @@ export default function PollAdmin() {
   }
 
   const cerrarPolla = async () => {
-    if (!pollId) return
+    if (!pollId || !poll) return
     if (!confirm('¿Cerrar la polla y repartir el bote? Esta acción no se puede deshacer fácilmente.')) return
     setClosing(true)
-    const { error } = await supabase.rpc('fn_cerrar_polla', { p_poll_id: pollId })
-    setClosing(false)
-    if (error) { showToast('Error al cerrar: ' + error.message); return }
-    showToast('¡Polla cerrada! Ganadores registrados.')
+
+    // Pollas cripto: llamar Edge Function (cierra + distribuye USDC)
+    if (isCryptoMoneda(poll.moneda)) {
+      try {
+        const { data: { session: currentSession } } = await supabase.auth.getSession()
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cerrar-polla`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${currentSession?.access_token}`,
+            },
+            body: JSON.stringify({ poll_id: pollId }),
+          }
+        )
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? 'Error al cerrar')
+        if (data.distribution) setDistResult(data.distribution)
+        showToast('¡Polla cerrada! USDC distribuido a ganadores.')
+      } catch (err: unknown) {
+        showToast('Error: ' + (err instanceof Error ? err.message : 'Error desconocido'))
+      } finally {
+        setClosing(false)
+      }
+    } else {
+      // Pollas fiat: flujo original
+      const { error } = await supabase.rpc('fn_cerrar_polla', { p_poll_id: pollId })
+      setClosing(false)
+      if (error) { showToast('Error al cerrar: ' + error.message); return }
+      showToast('¡Polla cerrada! Ganadores registrados.')
+    }
+
     await loadAll()
     setActiveTab('close')
   }
@@ -208,6 +350,62 @@ export default function PollAdmin() {
     if (error) { showToast('Error: ' + error.message); return }
     showToast('Polla reabierta')
     await loadAll()
+  }
+
+  const cancelarPolla = async () => {
+    if (!pollId || !poll) return
+    setCancelling(true)
+    setConfirmCancel(false)
+    try {
+      if (isCryptoMoneda(poll.moneda)) {
+        const { data: { session: currentSession } } = await supabase.auth.getSession()
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cancelar-polla`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${currentSession?.access_token}`,
+            },
+            body: JSON.stringify({ poll_id: pollId }),
+          }
+        )
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? 'Error al cancelar')
+        if (data.refunds) setCancelResult(data.refunds)
+        showToast('Polla cancelada. Reembolsos enviados.')
+      } else {
+        await supabase.from('pollas').update({ estado: 'cancelada' }).eq('id', pollId)
+        showToast('Polla cancelada.')
+      }
+      await loadAll()
+    } catch (err: unknown) {
+      showToast('Error: ' + (err instanceof Error ? err.message : 'Error desconocido'))
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  const expulsarMiembro = async (member: PollMemberWithProfile) => {
+    if (!confirm(`¿Quitar a ${member.profiles?.nombre ?? 'este participante'} de la polla?`)) return
+    const { error } = await supabase.from('poll_members')
+      .delete()
+      .eq('poll_id', pollId!)
+      .eq('user_id', member.user_id)
+    if (error) { showToast('Error: ' + error.message); return }
+    showToast(`${member.profiles?.nombre ?? 'Participante'} eliminado`)
+    await loadAll()
+  }
+
+  const copiarCodigo = () => {
+    const url = `${window.location.origin}/pollas?join=${poll?.codigo}`
+    navigator.clipboard.writeText(url).then(
+      () => showToast('¡Link copiado!'),
+      () => {
+        navigator.clipboard.writeText(poll?.codigo ?? '')
+        showToast('Código copiado: ' + poll?.codigo)
+      }
+    )
   }
 
   if (loading) return (
@@ -237,7 +435,10 @@ export default function PollAdmin() {
             </div>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
-            <button className="back-btn" onClick={() => navigate('/pollas')}>← Salir</button>
+            <div style={{ display:'flex', gap:6 }}>
+              <WalletButton />
+              <button className="back-btn" onClick={() => navigate('/pollas')}>← Salir</button>
+            </div>
             <button className="back-btn" style={{ color:'var(--lime)', borderColor:'rgba(200,255,60,.3)' }}
               onClick={() => navigate(`/pollas/${pollId}`)}>
               Vista jugador
@@ -275,65 +476,116 @@ export default function PollAdmin() {
           </div>
 
           {/* ---- TAB: Partidos ---- */}
-          {activeTab === 'matches' && (
-            <div>
-              {matches.map(m => {
-                const score = matchScores[m.id] || { local: 0, visitante: 0 }
-                const isSubmitting = submitting === m.id
-                return (
-                  <div key={m.id} className={`match ${m.cerrado ? 'locked' : ''}`}>
-                    <div className="when">
-                      <span>{m.fecha} · {m.fase}</span>
-                      {m.cerrado
-                        ? <span className="lockchip">🔒 cerrado</span>
-                        : m.destacado ? <span className="star">⭐ Colombia</span> : null}
-                    </div>
-                    <div className="teams">
-                      <div className="team">
-                        <div className="fl">{m.flag_local}</div>
-                        <div className="tn">{m.equipo_local}</div>
-                      </div>
-                      <div className="step">
-                        <button onClick={() => updateScore(m.id, 'local', -1)} disabled={m.cerrado || score.local === 0}>−</button>
-                        <div className="sv">{score.local}</div>
-                        <button onClick={() => updateScore(m.id, 'local', 1)} disabled={m.cerrado}>+</button>
-                      </div>
-                      <div className="midv">:</div>
-                      <div className="step">
-                        <button onClick={() => updateScore(m.id, 'visitante', -1)} disabled={m.cerrado || score.visitante === 0}>−</button>
-                        <div className="sv">{score.visitante}</div>
-                        <button onClick={() => updateScore(m.id, 'visitante', 1)} disabled={m.cerrado}>+</button>
-                      </div>
-                      <div className="team">
-                        <div className="fl">{m.flag_visitante}</div>
-                        <div className="tn">{m.equipo_visitante}</div>
-                      </div>
-                    </div>
-                    {m.cerrado
-                      ? <div className="ofline set">Resultado oficial: {m.resultado_local}–{m.resultado_visitante}</div>
-                      : <div className="ofline pend">Sin resultado oficial</div>}
-
-                    {/* Admin-only action box */}
-                    <div className="admin-box">
-                      <div className="admin-box-label">🛡️ Acción de admin</div>
-                      <div className="of-set" style={{ margin:0 }}>
-                        {m.cerrado ? (
-                          <button className="btnmini" onClick={() => reopenMatch(m.id)}>Reabrir partido</button>
-                        ) : (
-                          <button className="btnmini gold" onClick={() => submitResult(m)} disabled={isSubmitting}>
-                            {isSubmitting ? 'Guardando...' : 'Registrar resultado oficial'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
+          {activeTab === 'matches' && (() => {
+            const q = matchSearch.trim().toLowerCase()
+            const visibleMatches = matches.filter(m => {
+              const passesStatus =
+                matchView === 'todos' ? true :
+                matchView === 'pendientes' ? !m.cerrado :
+                m.cerrado
+              const passesSearch = !q ||
+                m.equipo_local.toLowerCase().includes(q) ||
+                m.equipo_visitante.toLowerCase().includes(q) ||
+                m.fase.toLowerCase().includes(q)
+              return passesStatus && passesSearch
+            })
+            const pendCount = matches.filter(m => !m.cerrado).length
+            const cerCount = matches.filter(m => m.cerrado).length
+            return (
+              <div>
+                {/* Barra de búsqueda y filtros */}
+                <div style={{ marginBottom:10 }}>
+                  <input
+                    className="inp"
+                    placeholder="Buscar equipo o fase…"
+                    value={matchSearch}
+                    onChange={e => setMatchSearch(e.target.value)}
+                    style={{ width:'100%', marginBottom:8, boxSizing:'border-box' }}
+                  />
+                  <div style={{ display:'flex', gap:6 }}>
+                    {([
+                      { v:'todos',     label:`Todos (${matches.length})` },
+                      { v:'pendientes',label:`Pendientes (${pendCount})` },
+                      { v:'cerrados',  label:`Cerrados (${cerCount})` },
+                    ] as const).map(({ v, label }) => (
+                      <button
+                        key={v}
+                        onClick={() => setMatchView(v)}
+                        style={{
+                          flex:1, padding:'5px 0', borderRadius:8, border:'1px solid',
+                          fontSize:10, fontWeight:700, cursor:'pointer',
+                          borderColor: matchView === v ? 'var(--gold)' : 'var(--line)',
+                          background: matchView === v ? 'rgba(255,194,75,.1)' : 'var(--panel-2)',
+                          color: matchView === v ? 'var(--gold)' : 'var(--muted)',
+                        }}
+                      >{label}</button>
+                    ))}
                   </div>
-                )
-              })}
-              <div className="lockmsg" style={{ marginTop:8 }}>
-                Al registrar el resultado, el partido se cierra y se calculan los puntos automáticamente.
+                </div>
+
+                {visibleMatches.length === 0 && (
+                  <div style={{ textAlign:'center', color:'var(--muted)', fontSize:12, padding:16 }}>
+                    Sin partidos para este filtro
+                  </div>
+                )}
+
+                {visibleMatches.map(m => {
+                  const score = matchScores[m.id] || { local: 0, visitante: 0 }
+                  const isSubmitting = submitting === m.id
+                  return (
+                    <div key={m.id} className={`match ${m.cerrado ? 'locked' : ''}`}>
+                      <div className="when">
+                        <span>{m.fecha} · {m.fase}</span>
+                        {m.cerrado
+                          ? <span className="lockchip">🔒 cerrado</span>
+                          : m.destacado ? <span className="star">⭐ Colombia</span> : null}
+                      </div>
+                      <div className="teams">
+                        <div className="team">
+                          <div className="fl">{m.flag_local}</div>
+                          <div className="tn">{m.equipo_local}</div>
+                        </div>
+                        <div className="step">
+                          <button onClick={() => updateScore(m.id, 'local', -1)} disabled={m.cerrado || score.local === 0}>−</button>
+                          <div className="sv">{score.local}</div>
+                          <button onClick={() => updateScore(m.id, 'local', 1)} disabled={m.cerrado}>+</button>
+                        </div>
+                        <div className="midv">:</div>
+                        <div className="step">
+                          <button onClick={() => updateScore(m.id, 'visitante', -1)} disabled={m.cerrado || score.visitante === 0}>−</button>
+                          <div className="sv">{score.visitante}</div>
+                          <button onClick={() => updateScore(m.id, 'visitante', 1)} disabled={m.cerrado}>+</button>
+                        </div>
+                        <div className="team">
+                          <div className="fl">{m.flag_visitante}</div>
+                          <div className="tn">{m.equipo_visitante}</div>
+                        </div>
+                      </div>
+                      {m.cerrado
+                        ? <div className="ofline set">Resultado oficial: {m.resultado_local}–{m.resultado_visitante}</div>
+                        : <div className="ofline pend">Sin resultado oficial</div>}
+
+                      <div className="admin-box">
+                        <div className="admin-box-label">🛡️ Acción de admin</div>
+                        <div className="of-set" style={{ margin:0 }}>
+                          {m.cerrado ? (
+                            <button className="btnmini" onClick={() => reopenMatch(m.id)}>Reabrir partido</button>
+                          ) : (
+                            <button className="btnmini gold" onClick={() => submitResult(m)} disabled={isSubmitting}>
+                              {isSubmitting ? 'Guardando...' : 'Registrar resultado oficial'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                <div className="lockmsg" style={{ marginTop:8 }}>
+                  Al registrar el resultado, el partido se cierra y se calculan los puntos automáticamente.
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* ---- TAB: Reglas ---- */}
           {activeTab === 'rules' && (
@@ -357,61 +609,145 @@ export default function PollAdmin() {
                 ))}
 
                 {/* Selección manual de partidos */}
-                {alcanceOp === 'seleccion' && (
-                  <div style={{ marginTop:12 }}>
-                    <div style={{ fontSize:10, color:'var(--gold)', fontWeight:700, textTransform:'uppercase',
-                      letterSpacing:1, marginBottom:8 }}>
-                      Elegí los partidos ({selectedMatchIds.length} seleccionados)
+                {alcanceOp === 'seleccion' && (() => {
+                  const colombiaMatches = matches.filter(m => m.destacado)
+                  const favMatches = matches.filter(m => !m.destacado && isFavorito(m))
+                  const grupoMatches = matches.filter(m => isGrupo(m.fase) && !isFavorito(m))
+                  const elimMatches = matches.filter(m => !isGrupo(m.fase) && !isFavorito(m))
+
+                  const catCounts: Record<SelCategory, number> = {
+                    todos: matches.length,
+                    colombia: colombiaMatches.length,
+                    favoritos: colombiaMatches.length + favMatches.length,
+                    grupos: grupoMatches.length,
+                    elim: elimMatches.length,
+                  }
+
+                  const sq = selSearch.trim().toLowerCase()
+                  const filterBySearch = (ms: Partido[]) =>
+                    sq ? ms.filter(m =>
+                      m.equipo_local.toLowerCase().includes(sq) ||
+                      m.equipo_visitante.toLowerCase().includes(sq)
+                    ) : ms
+
+                  let sections: { label: string; ms: Partido[] }[] = []
+                  if (selCategory === 'todos') {
+                    const col = filterBySearch(colombiaMatches)
+                    const fav = filterBySearch(favMatches)
+                    const grp = filterBySearch(grupoMatches)
+                    const eli = filterBySearch(elimMatches)
+                    if (col.length) sections.push({ label:'⭐ Colombia', ms: col })
+                    if (fav.length) sections.push({ label:'🔥 Favoritos', ms: fav })
+                    if (grp.length) sections.push({ label:'🏟️ Fase de Grupos', ms: grp })
+                    if (eli.length) sections.push({ label:'⚡ Eliminatorias', ms: eli })
+                  } else if (selCategory === 'colombia') {
+                    sections = [{ label:'⭐ Colombia', ms: filterBySearch(colombiaMatches) }]
+                  } else if (selCategory === 'favoritos') {
+                    const col = filterBySearch(colombiaMatches)
+                    const fav = filterBySearch(favMatches)
+                    if (col.length) sections.push({ label:'⭐ Colombia', ms: col })
+                    if (fav.length) sections.push({ label:'🔥 Otros favoritos', ms: fav })
+                  } else if (selCategory === 'grupos') {
+                    sections = [{ label:'🏟️ Fase de Grupos', ms: filterBySearch(matches.filter(m => isGrupo(m.fase))) }]
+                  } else {
+                    sections = [{ label:'⚡ Eliminatorias', ms: filterBySearch(matches.filter(m => !isGrupo(m.fase))) }]
+                  }
+
+                  const visibleIds = sections.flatMap(s => s.ms.map(m => m.id))
+                  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedMatchIds.includes(id))
+
+                  const selectAllVisible = () => {
+                    setSelectedMatchIds(prev => [...new Set([...prev, ...visibleIds])])
+                  }
+                  const deselectAllVisible = () => {
+                    setSelectedMatchIds(prev => prev.filter(id => !visibleIds.includes(id)))
+                  }
+
+                  return (
+                    <div style={{ marginTop:12 }}>
+                      {/* Header + contador */}
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                        <div style={{ fontSize:10, color:'var(--gold)', fontWeight:700, textTransform:'uppercase', letterSpacing:1 }}>
+                          {selectedMatchIds.length} seleccionados
+                        </div>
+                        <div style={{ display:'flex', gap:6 }}>
+                          <button
+                            onClick={allVisibleSelected ? deselectAllVisible : selectAllVisible}
+                            style={{ fontSize:9, padding:'3px 8px', borderRadius:6, border:'1px solid var(--line)',
+                              background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer' }}
+                          >
+                            {allVisibleSelected ? 'Quitar todos' : 'Marcar todos'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Búsqueda */}
+                      <input
+                        className="inp"
+                        placeholder="Buscar equipo…"
+                        value={selSearch}
+                        onChange={e => setSelSearch(e.target.value)}
+                        style={{ width:'100%', marginBottom:8, boxSizing:'border-box' }}
+                      />
+
+                      {/* Chips de categoría */}
+                      <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:10 }}>
+                        {([
+                          { v:'todos',     label:'Todos' },
+                          { v:'colombia',  label:'⭐ Colombia' },
+                          { v:'favoritos', label:'🔥 Favoritos' },
+                          { v:'grupos',    label:'🏟️ Grupos' },
+                          { v:'elim',      label:'⚡ Elim.' },
+                        ] as { v: SelCategory; label: string }[]).map(({ v, label }) => (
+                          <button
+                            key={v}
+                            onClick={() => setSelCategory(v)}
+                            style={{
+                              padding:'4px 10px', borderRadius:20, border:'1px solid', fontSize:10,
+                              fontWeight:700, cursor:'pointer',
+                              borderColor: selCategory === v ? 'var(--gold)' : 'var(--line)',
+                              background: selCategory === v ? 'rgba(255,194,75,.1)' : 'var(--panel-2)',
+                              color: selCategory === v ? 'var(--gold)' : 'var(--muted)',
+                            }}
+                          >
+                            {label}
+                            <span style={{ marginLeft:4, opacity:.7 }}>({catCounts[v]})</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Secciones de partidos */}
+                      {sections.length === 0 && (
+                        <div style={{ fontSize:11, color:'var(--muted)', textAlign:'center', padding:12 }}>
+                          Sin partidos para este filtro.
+                        </div>
+                      )}
+                      {sections.map(({ label, ms }) => (
+                        <div key={label} style={{ marginBottom:10 }}>
+                          <div style={{ fontSize:9, color:'var(--muted)', fontWeight:700, textTransform:'uppercase',
+                            letterSpacing:1, marginBottom:4 }}>{label}</div>
+                          {ms.map(m => (
+                            <label key={m.id} style={{ display:'flex', alignItems:'center', gap:8,
+                              padding:'7px 8px', borderRadius:8, cursor:'pointer',
+                              background: selectedMatchIds.includes(m.id) ? 'rgba(255,194,75,.07)' : 'transparent',
+                              border: selectedMatchIds.includes(m.id) ? '1px solid rgba(255,194,75,.2)' : '1px solid transparent',
+                              marginBottom:3 }}>
+                              <input type="checkbox" checked={selectedMatchIds.includes(m.id)}
+                                onChange={() => toggleMatchSelection(m.id)}
+                                style={{ accentColor:'var(--gold)', width:14, height:14, flexShrink:0 }} />
+                              <span style={{ fontSize:12 }}>{m.flag_local}</span>
+                              <span style={{ fontSize:11, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                                {m.equipo_local} <span style={{ color:'var(--muted)' }}>vs</span> {m.equipo_visitante}
+                              </span>
+                              <span style={{ fontSize:12 }}>{m.flag_visitante}</span>
+                              <span style={{ fontSize:9, color:'var(--muted)', flexShrink:0 }}>{m.fecha}</span>
+                            </label>
+                          ))}
+                        </div>
+                      ))}
                     </div>
-                    {/* Group stage */}
-                    {matches.some(m => isGrupo(m.fase)) && (
-                      <div style={{ marginBottom:8 }}>
-                        <div style={{ fontSize:9, color:'var(--muted)', fontWeight:700, textTransform:'uppercase',
-                          letterSpacing:1, marginBottom:4 }}>Fase de Grupos</div>
-                        {matches.filter(m => isGrupo(m.fase)).map(m => (
-                          <label key={m.id} style={{ display:'flex', alignItems:'center', gap:8,
-                            padding:'6px 8px', borderRadius:8, cursor:'pointer',
-                            background: selectedMatchIds.includes(m.id) ? 'rgba(255,194,75,.07)' : 'transparent',
-                            marginBottom:2 }}>
-                            <input type="checkbox" checked={selectedMatchIds.includes(m.id)}
-                              onChange={() => toggleMatchSelection(m.id)}
-                              style={{ accentColor:'var(--gold)', width:14, height:14 }} />
-                            <span style={{ fontSize:11 }}>
-                              {m.flag_local} {m.equipo_local} vs {m.equipo_visitante} {m.flag_visitante}
-                            </span>
-                            <span style={{ fontSize:9, color:'var(--muted)', marginLeft:'auto' }}>{m.fecha}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    {/* Knockout */}
-                    {matches.some(m => !isGrupo(m.fase)) && (
-                      <div>
-                        <div style={{ fontSize:9, color:'var(--muted)', fontWeight:700, textTransform:'uppercase',
-                          letterSpacing:1, marginBottom:4 }}>Eliminatorias</div>
-                        {matches.filter(m => !isGrupo(m.fase)).map(m => (
-                          <label key={m.id} style={{ display:'flex', alignItems:'center', gap:8,
-                            padding:'6px 8px', borderRadius:8, cursor:'pointer',
-                            background: selectedMatchIds.includes(m.id) ? 'rgba(255,194,75,.07)' : 'transparent',
-                            marginBottom:2 }}>
-                            <input type="checkbox" checked={selectedMatchIds.includes(m.id)}
-                              onChange={() => toggleMatchSelection(m.id)}
-                              style={{ accentColor:'var(--gold)', width:14, height:14 }} />
-                            <span style={{ fontSize:11 }}>
-                              {m.flag_local} {m.equipo_local} vs {m.equipo_visitante} {m.flag_visitante}
-                            </span>
-                            <span style={{ fontSize:9, color:'var(--muted)', marginLeft:'auto' }}>{m.fecha}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    {matches.length === 0 && (
-                      <div style={{ fontSize:11, color:'var(--muted)', textAlign:'center', padding:12 }}>
-                        Los partidos se cargan cuando estén disponibles.
-                      </div>
-                    )}
-                  </div>
-                )}
+                  )
+                })()}
               </div>
 
               <div className="acard">
@@ -505,13 +841,23 @@ export default function PollAdmin() {
                             {tableRow?.puntos ?? 0} pts · se unió {new Date(m.joined_at).toLocaleDateString('es-CO')}
                           </div>
                         </div>
-                        <div className="admin-box" style={{ margin:0, padding:'4px 8px', display:'flex', alignItems:'center' }}>
+                        <div style={{ display:'flex', flexDirection:'column', gap:4, alignItems:'flex-end', flexShrink:0 }}>
                           <button
                             className={`toggle ${m.pagado ? 'paid' : 'unpaid'}`}
                             onClick={() => togglePagado(m)}
                           >
                             {m.pagado ? 'Pagó ✓' : 'Pendiente'}
                           </button>
+                          {!isAdminUser && (
+                            <button
+                              onClick={() => expulsarMiembro(m)}
+                              style={{ fontSize:9, padding:'2px 7px', borderRadius:6,
+                                border:'1px solid rgba(255,90,95,.3)', background:'rgba(255,90,95,.07)',
+                                color:'var(--lose)', cursor:'pointer' }}
+                            >
+                              Quitar
+                            </button>
+                          )}
                         </div>
                       </div>
                     )
@@ -521,8 +867,20 @@ export default function PollAdmin() {
 
               <div className="scoring">
                 <span className="ttl">Código de invitación</span>
-                Comparte este código para que otros se unan:{' '}
-                <b style={{ fontFamily:"'Anton',sans-serif", fontSize:16, letterSpacing:3 }}>{poll.codigo}</b>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginTop:6 }}>
+                  <b style={{ fontFamily:"'Anton',sans-serif", fontSize:20, letterSpacing:4 }}>{poll.codigo}</b>
+                  <button
+                    onClick={copiarCodigo}
+                    style={{ padding:'6px 14px', borderRadius:8, border:'1px solid var(--lime)',
+                      background:'rgba(200,255,60,.08)', color:'var(--lime)', fontSize:11,
+                      fontWeight:700, cursor:'pointer', letterSpacing:.5, flexShrink:0 }}
+                  >
+                    Copiar link
+                  </button>
+                </div>
+                <div style={{ fontSize:10, color:'var(--muted)', marginTop:4 }}>
+                  Comparte este código o el link directo para que otros se unan.
+                </div>
               </div>
 
               {/* Activity summary */}
@@ -547,6 +905,57 @@ export default function PollAdmin() {
                   ))}
                 </div>
               </div>
+
+              {/* Pagos on-chain (solo pollas cripto) */}
+              {isCryptoMoneda(poll.moneda) && payments.length > 0 && (
+                <div className="acard" style={{ marginTop:10 }}>
+                  <div className="h">Pagos on-chain · {monedaToToken(poll.moneda)}</div>
+                  <div style={{ marginTop:8 }}>
+                    {payments.map((p, i) => {
+                      const member = members.find(m => m.user_id === p.user_id)
+                      return (
+                        <div key={p.id} style={{ padding:'7px 0',
+                          borderBottom: i < payments.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', fontSize:11 }}>
+                            <b style={{ color:'var(--txt)' }}>{member?.profiles?.nombre ?? p.user_id.slice(0,8)}</b>
+                            <span style={{
+                              color: p.status === 'confirmed' ? 'var(--win)'
+                                : p.status === 'refunded' ? 'var(--gold)'
+                                : p.status === 'failed' ? 'var(--lose)'
+                                : 'var(--muted)',
+                              fontWeight:700, fontSize:10
+                            }}>
+                              {p.status === 'confirmed' ? `✓ ${fmt(p.amount)} ${p.token}`
+                                : p.status === 'refunded' ? `↩ Reembolsado`
+                                : p.status === 'failed' ? `✗ Error`
+                                : `⏳ Pendiente`}
+                            </span>
+                          </div>
+                          <div style={{ fontSize:9, color:'var(--muted)', marginTop:2, fontFamily:'monospace', wordBreak:'break-all' }}>
+                            {p.wallet_address.slice(0,6)}…{p.wallet_address.slice(-4)}
+                            {p.tx_hash && (
+                              <> ·{' '}
+                                <a href={celoscanTx(p.tx_hash)} target="_blank" rel="noopener noreferrer"
+                                  style={{ color:'var(--lime)' }}>
+                                  dep: {p.tx_hash.slice(0,8)}…
+                                </a>
+                              </>
+                            )}
+                            {p.refund_tx_hash && (
+                              <> ·{' '}
+                                <a href={celoscanTx(p.refund_tx_hash)} target="_blank" rel="noopener noreferrer"
+                                  style={{ color:'var(--gold)' }}>
+                                  ref: {p.refund_tx_hash.slice(0,8)}…
+                                </a>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -567,19 +976,38 @@ export default function PollAdmin() {
 
                   {tabla.length > 0 && (
                     <div className="podium-wrap">
-                      {tabla.slice(0, nPremios).map((row, i) => (
-                        <div key={row.user_id} className={`wcard g${i + 1}`}>
-                          <div className="wmedal">{MEDALS[i]}</div>
-                          <div className="winfo">
-                            <div className="wname">{row.nombre}</div>
-                            <div className="wsub">{row.puntos} pts · {row.exactos} exactos</div>
+                      {tabla.slice(0, nPremios).map((row, i) => {
+                        const wallet = winnerWallets[row.user_id]
+                        const isCrypto = isCryptoMoneda(poll.moneda)
+                        return (
+                          <div key={row.user_id} className={`wcard g${i + 1}`}>
+                            <div className="wmedal">{MEDALS[i]}</div>
+                            <div className="winfo">
+                              <div className="wname">{row.nombre}</div>
+                              <div className="wsub">{row.puntos} pts · {row.exactos} exactos</div>
+                              {isCrypto && (
+                                wallet
+                                  ? <div style={{ fontSize:9, color:'var(--lime)', marginTop:2, wordBreak:'break-all', fontFamily:'monospace' }}>
+                                      {wallet.slice(0,6)}...{wallet.slice(-4)}
+                                    </div>
+                                  : <div style={{ fontSize:9, color:'var(--gold)', marginTop:2, fontWeight:700 }}>
+                                      Sin wallet · no recibirá cripto
+                                    </div>
+                              )}
+                            </div>
+                            <div className="wprize">
+                              <div className="pa">{fmt(bote * premios[i] / 100)}</div>
+                              <div className="pl">{poll.moneda}</div>
+                            </div>
                           </div>
-                          <div className="wprize">
-                            <div className="pa">{fmt(bote * premios[i] / 100)}</div>
-                            <div className="pl">{poll.moneda}</div>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {isCryptoMoneda(poll.moneda) && tabla.slice(0, nPremios).some(r => !winnerWallets[r.user_id]) && (
+                    <div className="hook warn" style={{ marginBottom:8, lineHeight:1.5 }}>
+                      Uno o más ganadores no tienen wallet conectada. El pago quedará pendiente hasta que conecten su wallet.
                     </div>
                   )}
 
@@ -593,13 +1021,103 @@ export default function PollAdmin() {
 
                   <div className="admin-box" style={{ marginBottom:8 }}>
                     <div className="admin-box-label">🛡️ Acción de admin · irreversible</div>
-                    <button className="save gold" onClick={cerrarPolla} disabled={closing || pagados.length === 0} style={{ margin:0 }}>
-                      {closing ? 'Cerrando...' : 'Cerrar polla y repartir el bote'}
+                    <button className="save gold" onClick={cerrarPolla} disabled={closing || cancelling || pagados.length === 0} style={{ margin:0 }}>
+                      {closing
+                        ? 'Cerrando...'
+                        : isCryptoMoneda(poll.moneda)
+                          ? `Cerrar y distribuir ${monedaToToken(poll.moneda)} en Celo`
+                          : 'Cerrar polla y repartir el bote'}
                     </button>
                     <div className="lockmsg" style={{ marginTop:6 }}>
                       Cerrar bloquea todas las apuestas y confirma a los ganadores definitivamente.
                     </div>
                   </div>
+
+                  {/* Cancelación */}
+                  <div className="admin-box" style={{ marginBottom:8, borderColor:'var(--lose)' }}>
+                    <div className="admin-box-label" style={{ color:'var(--lose)' }}>⚠️ Zona de peligro · cancelar polla</div>
+                    {!confirmCancel ? (
+                      <>
+                        <button
+                          className="save ghost"
+                          onClick={() => setConfirmCancel(true)}
+                          disabled={closing || cancelling}
+                          style={{ margin:0, borderColor:'var(--lose)', color:'var(--lose)' }}
+                        >
+                          Cancelar polla
+                        </button>
+                        <div className="lockmsg" style={{ marginTop:6 }}>
+                          {isCryptoMoneda(poll.moneda)
+                            ? `Cancela la polla y reembolsa ${fmt(pagados.length * poll.inscripcion)} ${monedaToToken(poll.moneda)} a ${pagados.length} participante(s).`
+                            : 'Cancela la polla definitivamente. Los pagos fiat deben gestionarse manualmente.'}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                        <div style={{ fontSize:12, color:'var(--lose)', fontWeight:700 }}>
+                          ¿Confirmar cancelación?{isCryptoMoneda(poll.moneda) ? ` Se devolverá ${monedaToToken(poll.moneda)} a cada participante.` : ''}
+                        </div>
+                        <div style={{ display:'flex', gap:8 }}>
+                          <button
+                            className="save ghost"
+                            onClick={() => setConfirmCancel(false)}
+                            style={{ margin:0, flex:1 }}
+                          >
+                            No, volver
+                          </button>
+                          <button
+                            className="save"
+                            onClick={cancelarPolla}
+                            disabled={cancelling}
+                            style={{ margin:0, flex:1, background:'var(--lose)', borderColor:'var(--lose)' }}
+                          >
+                            {cancelling ? 'Cancelando...' : 'Sí, cancelar'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : poll.estado === 'cancelada' ? (
+                <>
+                  <div className="acard">
+                    <div className="h">❌ Polla cancelada <span className="badge closed">cancelada</span></div>
+                    <div className="d">
+                      {isCryptoMoneda(poll.moneda)
+                        ? `Se reembolsaron ${monedaToToken(poll.moneda)} a los participantes que habían pagado.`
+                        : 'La polla fue cancelada.'}
+                    </div>
+                  </div>
+
+                  {isCryptoMoneda(poll.moneda) && cancelResult.length > 0 && (
+                    <div className="acard" style={{ marginTop:10 }}>
+                      <div className="h">Reembolsos on-chain</div>
+                      {cancelResult.map((r, i) => (
+                        <div key={r.user_id} style={{ display:'flex', justifyContent:'space-between',
+                          alignItems:'center', padding:'6px 0',
+                          borderBottom: i < cancelResult.length - 1 ? '1px solid var(--line)' : 'none', fontSize:11 }}>
+                          <span style={{ color:'var(--muted)', fontFamily:'monospace', fontSize:10 }}>
+                            {r.wallet.slice(0,6)}…{r.wallet.slice(-4)}
+                            <b style={{ color:'var(--txt)', fontFamily:'inherit', marginLeft:6 }}>
+                              {fmt(r.amount)} {monedaToToken(poll.moneda)}
+                            </b>
+                          </span>
+                          {r.status === 'refunded' && r.refund_tx_hash ? (
+                            <a
+                              href={celoscanTx(r.refund_tx_hash)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontSize:10, color:'var(--gold)', fontWeight:700 }}
+                            >
+                              {r.refund_tx_hash.slice(0,8)}… →
+                            </a>
+                          ) : (
+                            <span style={{ fontSize:10, color:'var(--lose)', fontWeight:600 }}>Falló</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -611,20 +1129,71 @@ export default function PollAdmin() {
                   </div>
 
                   <div className="podium-wrap">
-                    {tabla.slice(0, nPremios).map((row, i) => (
-                      <div key={row.user_id} className={`wcard g${i + 1}`}>
-                        <div className="wmedal">{MEDALS[i]}</div>
-                        <div className="winfo">
-                          <div className="wname">{row.nombre}</div>
-                          <div className="wsub">{row.puntos} pts · {row.exactos} exactos</div>
+                    {tabla.slice(0, nPremios).map((row, i) => {
+                      const dist = distResult.find(d => d.user_id === row.user_id)
+                      const isCrypto = isCryptoMoneda(poll.moneda)
+                      return (
+                        <div key={row.user_id} className={`wcard g${i + 1}`}>
+                          <div className="wmedal">{MEDALS[i]}</div>
+                          <div className="winfo">
+                            <div className="wname">{row.nombre}</div>
+                            <div className="wsub">{row.puntos} pts · {row.exactos} exactos</div>
+                            {isCrypto && dist && (
+                              dist.status === 'sent' && dist.tx_hash
+                                ? <a
+                                    href={celoscanTx(dist.tx_hash)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ fontSize:9, color:'var(--lime)', fontWeight:700, marginTop:2, display:'block' }}
+                                  >
+                                    Enviado · ver en Celoscan →
+                                  </a>
+                                : dist.status === 'pending_wallet'
+                                  ? <div style={{ fontSize:9, color:'var(--gold)', marginTop:2, fontWeight:700 }}>
+                                      Pendiente · sin wallet
+                                    </div>
+                                  : <div style={{ fontSize:9, color:'var(--lose)', marginTop:2, fontWeight:700 }}>
+                                      Error en transferencia
+                                    </div>
+                            )}
+                          </div>
+                          <div className="wprize">
+                            <div className="pa">{fmt(bote * premios[i] / 100)}</div>
+                            <div className="pl">{poll.moneda}</div>
+                          </div>
                         </div>
-                        <div className="wprize">
-                          <div className="pa">{fmt(bote * premios[i] / 100)}</div>
-                          <div className="pl">{poll.moneda}</div>
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
+
+                  {isCryptoMoneda(poll.moneda) && distResult.length > 0 && (
+                    <div className="acard" style={{ marginTop:10 }}>
+                      <div className="h">Distribución on-chain</div>
+                      {distResult.map((d, i) => (
+                        <div key={d.user_id} style={{ display:'flex', justifyContent:'space-between',
+                          alignItems:'center', padding:'6px 0',
+                          borderBottom: i < distResult.length - 1 ? '1px solid var(--line)' : 'none', fontSize:11 }}>
+                          <span style={{ color:'var(--muted)' }}>
+                            {MEDALS[d.puesto - 1]} <b style={{ color:'var(--txt)' }}>{fmt(d.monto)} {monedaToToken(poll.moneda)}</b>
+                          </span>
+                          {d.status === 'sent' && d.tx_hash ? (
+                            <a
+                              href={celoscanTx(d.tx_hash)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontSize:10, color:'var(--lime)', fontWeight:700 }}
+                            >
+                              {d.tx_hash.slice(0,8)}… →
+                            </a>
+                          ) : d.status === 'pending_wallet' ? (
+                            <span style={{ fontSize:10, color:'var(--gold)', fontWeight:600 }}>Pendiente wallet</span>
+                          ) : (
+                            <span style={{ fontSize:10, color:'var(--lose)', fontWeight:600 }}>Falló</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="admin-box" style={{ marginBottom:8 }}>
                     <div className="admin-box-label">🛡️ Acción de admin</div>
