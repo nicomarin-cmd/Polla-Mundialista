@@ -247,6 +247,19 @@ export default function PollPlayer() {
 
   useEffect(() => { loadAll() }, [loadAll])
 
+  // Realtime: reacciona al instante cuando el cron escribe resultados
+  // Fallback: refresca cada 60s por si el canal WebSocket se interrumpe
+  useEffect(() => {
+    if (!pollId) return
+    const channel = supabase
+      .channel(`player-rt-${pollId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'poll_resultados', filter: `poll_id=eq.${pollId}` }, () => { loadAll() })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'partidos' }, () => { loadAll() })
+      .subscribe()
+    const fallback = setInterval(() => { loadAll() }, 60_000)
+    return () => { supabase.removeChannel(channel); clearInterval(fallback) }
+  }, [pollId, loadAll])
+
   const updatePred = (matchId: string, side: 'local' | 'visitante', delta: number) => {
     setPreds(prev => {
       const cur = prev[matchId] || { local: 0, visitante: 0 }
@@ -560,7 +573,7 @@ export default function PollPlayer() {
                             onClick={() => saveSinglePred(m.id)}
                             disabled={ms === 'saving'}
                           >
-                            {ms === 'saving' ? '…' : ms === 'saved' ? '✓ Guardada' : 'Guardar'}
+                            {ms === 'saving' ? '…' : ms === 'saved' ? '✓ Confirmada' : 'Confirmar apuesta'}
                           </button>
                         </div>
                       </div>
@@ -575,9 +588,9 @@ export default function PollPlayer() {
                         disabled={saving}
                         style={{ marginTop:8 }}
                       >
-                        {saving ? 'Guardando...' : saveState === 'saved' ? '✓ Todas guardadas' : 'Guardar todas las apuestas'}
+                        {saving ? 'Guardando...' : saveState === 'saved' ? '✓ Todas confirmadas' : 'Confirmar todas las apuestas'}
                       </button>
-                      <div className="lockmsg">🔒 Cada apuesta se bloquea cuando el admin registra el resultado del partido</div>
+                      <div className="lockmsg">🔒 Cada apuesta se bloquea automáticamente cuando arranca el partido</div>
                     </>
                   )}
 
@@ -589,7 +602,7 @@ export default function PollPlayer() {
                       </div>
                       {openMatches.length === 0 && (
                         <div style={{ fontSize:11, color:'var(--muted)', marginBottom:10, textAlign:'center' }}>
-                          El admin registró los resultados. Ve a <b>Resultados</b> para ver tus puntos.
+                          Los partidos ya arrancaron. Ve a <b>Resultados</b> para ver tus puntos.
                         </div>
                       )}
                       {closedMatches.map(m => {
