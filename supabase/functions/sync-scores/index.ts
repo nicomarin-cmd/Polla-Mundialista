@@ -13,7 +13,9 @@ const TEAM_MAP: Record<string, string> = {
   'Mexico': 'México', 'South Africa': 'Sudáfrica',
   'Korea Republic': 'Corea del Sur', 'South Korea': 'Corea del Sur',
   'Czechia': 'Chequia', 'Czech Republic': 'Chequia',
-  'Canada': 'Canadá', 'Bosnia and Herzegovina': 'Bosnia',
+  'Canada': 'Canadá',
+  'Bosnia and Herzegovina': 'Bosnia', 'Bosnia Herzegovina': 'Bosnia',
+  'Bosnia & Herzegovina': 'Bosnia', 'Bosnia-Herzegovina': 'Bosnia', 'BiH': 'Bosnia',
   'Brazil': 'Brasil', 'Morocco': 'Marruecos',
   'United States': 'EE. UU.', 'USA': 'EE. UU.',
   'Paraguay': 'Paraguay', 'Australia': 'Australia',
@@ -127,7 +129,7 @@ Deno.serve(async (req) => {
     // ── 2. Partidos en nuestra BD ────────────────────────────────────────────
     const { data: dbPartidos, error: dbErr } = await db
       .from('partidos')
-      .select('id, equipo_local, equipo_visitante, api_match_id, orden')
+      .select('id, equipo_local, equipo_visitante, api_match_id, orden, fecha_inicio')
     if (dbErr) throw dbErr
 
     // Índices para búsqueda rápida
@@ -151,6 +153,13 @@ Deno.serve(async (req) => {
       // Ignorar si algún equipo es "TBD" (cruces sin definir)
       if (homeEs === 'TBD' || awayEs === 'TBD' || !homeRaw || !awayRaw) continue
       if (homeRaw.includes('TBD') || awayRaw.includes('TBD')) continue
+
+      // Log para debug: partidos ya iniciados que no se encuentran en la BD
+      const kickoffDebug = new Date(am.utcDate)
+      if (kickoffDebug <= now) {
+        const found = byApiId.has(am.id) || byTeams.has(`${homeEs}|${awayEs}`) || byTeams.has(`${awayEs}|${homeEs}`)
+        if (!found) console.log(`NO-MATCH api_id=${am.id} raw="${homeRaw}" vs "${awayRaw}" mapped="${homeEs}" vs "${awayEs}" status=${am.status}`)
+      }
 
       // Buscar partido existente en BD
       let dbPartido = byApiId.get(am.id) ?? byTeams.get(`${homeEs}|${awayEs}`) ?? byTeams.get(`${awayEs}|${homeEs}`)
@@ -182,11 +191,17 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Actualizar api_match_id en partidos ya existentes sin él
-      if (dbPartido && !dbPartido.api_match_id) {
-        await db.from('partidos').update({ api_match_id: am.id }).eq('id', dbPartido.id)
-        dbPartido.api_match_id = am.id
-        byApiId.set(am.id, dbPartido)
+      // Actualizar api_match_id y/o fecha_inicio en partidos ya existentes que les falte
+      if (dbPartido && (!dbPartido.api_match_id || !dbPartido.fecha_inicio)) {
+        const updates: Record<string, unknown> = {}
+        if (!dbPartido.api_match_id)  updates.api_match_id  = am.id
+        if (!dbPartido.fecha_inicio)  updates.fecha_inicio  = am.utcDate
+        await db.from('partidos').update(updates).eq('id', dbPartido.id)
+        if (!dbPartido.api_match_id) {
+          dbPartido.api_match_id = am.id
+          byApiId.set(am.id, dbPartido)
+        }
+        if (!dbPartido.fecha_inicio) dbPartido.fecha_inicio = am.utcDate
       }
 
       // Solo actualizamos scores si el partido ya empezó
