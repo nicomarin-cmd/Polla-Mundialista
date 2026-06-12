@@ -5,6 +5,10 @@
   --blue:#2b6bff; --pink:#ff3da9;
   --shadow:0 20px 50px -14px rgba(0,0,0,.85);
 }
+@keyframes pulse-live{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.65;transform:scale(.95)}
+}
 *{box-sizing:border-box;margin:0;padding:0}
 body{
   font-family:'Archivo',sans-serif;

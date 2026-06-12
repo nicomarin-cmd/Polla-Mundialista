@@ -40,6 +40,7 @@ export interface Partido {
   resultado_visitante: number | null
   cerrado: boolean
   destacado: boolean
+  en_vivo?: boolean    // partido empezado pero no marcado como finalizado en DB
 }
 
 export interface PollResultado {

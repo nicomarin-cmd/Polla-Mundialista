@@ -167,13 +167,19 @@ export default function PollPlayer() {
     const resMap: Record<string, PollResultado> = {}
     ;(resultadosData || []).forEach((r: PollResultado) => { resMap[r.partido_id] = r })
     const now = new Date()
-    const ms = ((matchesData || []) as Partido[]).map(m => ({
-      ...m,
-      resultado_local:     resMap[m.id]?.resultado_local     ?? null,
-      resultado_visitante: resMap[m.id]?.resultado_visitante ?? null,
-      // Cerrado si: partido terminó (cerrado=true en DB) O ya pasó el kick-off
-      cerrado: (resMap[m.id]?.cerrado === true) || (m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false),
-    }))
+    const ms = ((matchesData || []) as Partido[]).map(m => {
+      const dbRow   = resMap[m.id]
+      const kickoff = m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false
+      const finalizado = dbRow?.cerrado === true
+      const enVivo  = kickoff && !finalizado
+      return {
+        ...m,
+        resultado_local:     dbRow?.resultado_local     ?? null,
+        resultado_visitante: dbRow?.resultado_visitante ?? null,
+        cerrado:  finalizado || enVivo,
+        en_vivo:  enVivo,
+      }
+    })
     setMatches(ms)
     setMyMember(memberData as PollMember | null)
 
@@ -608,12 +614,32 @@ export default function PollPlayer() {
                       {closedMatches.map(m => {
                         const pr = preds[m.id]
                         const hasResult = m.resultado_local !== null
+                        const live = !!m.en_vivo
                         return (
-                          <div key={m.id} className="match" style={{ opacity:0.65 }}>
+                          <div key={m.id} className="match" style={{
+                            opacity: live ? 1 : 0.65,
+                            borderColor: live ? 'rgba(255,90,95,.4)' : undefined,
+                            background: live ? 'rgba(255,90,95,.04)' : undefined,
+                          }}>
                             <div className="when">
                               <span>{m.fecha} · {m.fase}</span>
-                              <span style={{ fontSize:9, color:'var(--lime)', fontWeight:700 }}>🔒 Cerrado</span>
+                              {live ? (
+                                <span style={{
+                                  fontSize:9, fontWeight:700, color:'#fff',
+                                  background:'#ff2e2e', borderRadius:5,
+                                  padding:'2px 6px', letterSpacing:.5,
+                                  animation:'pulse-live 1.4s ease-in-out infinite',
+                                }}>⚽ EN VIVO</span>
+                              ) : (
+                                <span style={{ fontSize:9, color:'var(--muted)', fontWeight:700 }}>✓ Final</span>
+                              )}
                             </div>
+                            {live && (
+                              <div style={{ fontSize:9, color:'rgba(255,90,95,.8)', fontWeight:700,
+                                textTransform:'uppercase', letterSpacing:1, marginBottom:6 }}>
+                                {hasResult ? 'Marcador actual' : 'Partido en curso'}
+                              </div>
+                            )}
                             <div className="teams">
                               <div className="team">
                                 <div className="fl">{m.flag_local}</div>
@@ -621,7 +647,12 @@ export default function PollPlayer() {
                               </div>
                               <div style={{ minWidth:60, textAlign:'center' }}>
                                 {hasResult ? (
-                                  <div style={{ fontFamily:"'Anton',sans-serif", fontSize:20, color:'var(--txt)', letterSpacing:1 }}>
+                                  <div style={{
+                                    fontFamily:"'Anton',sans-serif",
+                                    fontSize: live ? 26 : 20,
+                                    color: live ? '#ff2e2e' : 'var(--txt)',
+                                    letterSpacing:1,
+                                  }}>
                                     {m.resultado_local}–{m.resultado_visitante}
                                   </div>
                                 ) : (
@@ -693,20 +724,40 @@ export default function PollPlayer() {
                   const pr = preds[m.id]
                   const x = calcPoints(pr, m, reglas)
                   const maj = majority[m.id]
+                  const live = !!m.en_vivo
                   return (
-                    <div key={m.id} className="res" style={{ flexDirection:'column', alignItems:'stretch', gap:0 }}>
+                    <div key={m.id} className="res" style={{
+                      flexDirection:'column', alignItems:'stretch', gap:0,
+                      borderColor: live ? 'rgba(255,90,95,.4)' : undefined,
+                      background: live ? 'rgba(255,90,95,.04)' : undefined,
+                    }}>
+                      {live && (
+                        <div style={{ fontSize:9, fontWeight:700, color:'#ff2e2e',
+                          textTransform:'uppercase', letterSpacing:1, marginBottom:6,
+                          display:'flex', alignItems:'center', gap:5 }}>
+                          <span style={{ display:'inline-block', width:7, height:7,
+                            borderRadius:'50%', background:'#ff2e2e',
+                            animation:'pulse-live 1.4s ease-in-out infinite' }} />
+                          En vivo · marcador actual
+                        </div>
+                      )}
                       <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                         <div className="info">
                           <div className="ln">
                             {m.flag_local} {m.equipo_local}
-                            <span className="scorebox">{m.resultado_local}–{m.resultado_visitante}</span>
+                            <span className="scorebox" style={{ color: live ? '#ff2e2e' : undefined }}>
+                              {m.resultado_local !== null ? `${m.resultado_local}–${m.resultado_visitante}` : '–'}
+                            </span>
                             {m.equipo_visitante} {m.flag_visitante}
                           </div>
                           <div className="sub">
                             Tu apuesta: <b>{pr ? `${pr.local}–${pr.visitante}` : '—'}</b>
                           </div>
                         </div>
-                        <div className={`pts ${x.kind}`}>+{x.pts}<br /><span style={{ fontSize:8, fontWeight:600 }}>{x.tag}</span></div>
+                        <div className={`pts ${live ? 'pendiente' : x.kind}`}>
+                          {live ? '⚽' : `+${x.pts}`}
+                          <br /><span style={{ fontSize:8, fontWeight:600 }}>{live ? 'En vivo' : x.tag}</span>
+                        </div>
                       </div>
                       {maj && maj.total > 0 && (
                         <div style={{ marginTop:8 }}>

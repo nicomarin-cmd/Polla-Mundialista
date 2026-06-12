@@ -192,13 +192,19 @@ export default function PollAdmin() {
     const resMap: Record<string, PollResultado> = {}
     ;(resultadosData || []).forEach((r: PollResultado) => { resMap[r.partido_id] = r })
     const now = new Date()
-    const ms = ((matchesData || []) as Partido[]).map(m => ({
-      ...m,
-      resultado_local:     resMap[m.id]?.resultado_local     ?? null,
-      resultado_visitante: resMap[m.id]?.resultado_visitante ?? null,
-      // Cerrado si: partido terminó (cerrado=true en DB) O ya pasó el kick-off
-      cerrado: (resMap[m.id]?.cerrado === true) || (m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false),
-    }))
+    const ms = ((matchesData || []) as Partido[]).map(m => {
+      const dbRow   = resMap[m.id]
+      const kickoff = m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false
+      const finalizado = dbRow?.cerrado === true
+      const enVivo  = kickoff && !finalizado
+      return {
+        ...m,
+        resultado_local:     dbRow?.resultado_local     ?? null,
+        resultado_visitante: dbRow?.resultado_visitante ?? null,
+        cerrado:  finalizado || enVivo,
+        en_vivo:  enVivo,
+      }
+    })
 
     setPoll(p)
     setMatches(ms)
@@ -612,12 +618,20 @@ export default function PollAdmin() {
                       : 'Empate'
                     : 'Sin apuesta aún'
                   return (
-                    <div key={m.id} className={`match ${m.cerrado ? 'locked' : ''}`}>
+                    <div key={m.id} className={`match ${m.cerrado ? 'locked' : ''}`} style={{
+                      borderColor: m.en_vivo ? 'rgba(255,90,95,.4)' : undefined,
+                      background: m.en_vivo ? 'rgba(255,90,95,.04)' : undefined,
+                    }}>
                       <div className="when">
                         <span>{m.fecha} · {m.fase}</span>
-                        {m.cerrado
-                          ? <span className="lockchip">🔒 cerrado</span>
-                          : m.destacado ? <span className="star">⭐ Colombia</span> : null}
+                        {m.en_vivo
+                          ? <span style={{ fontSize:9, fontWeight:700, color:'#fff',
+                              background:'#ff2e2e', borderRadius:5,
+                              padding:'2px 6px', letterSpacing:.5,
+                              animation:'pulse-live 1.4s ease-in-out infinite' }}>⚽ EN VIVO</span>
+                          : m.cerrado
+                            ? <span className="lockchip">✓ Final</span>
+                            : m.destacado ? <span className="star">⭐ Colombia</span> : null}
                       </div>
 
                       {/* Sección de apuesta propia (todos apuestan, incluyendo el admin) */}
@@ -662,13 +676,23 @@ export default function PollAdmin() {
                         </>
                       ) : (
                         <>
-                          {/* Equipos + marcador final para partidos cerrados */}
+                          {m.en_vivo && (
+                            <div style={{ fontSize:9, color:'rgba(255,90,95,.9)', fontWeight:700,
+                              textTransform:'uppercase', letterSpacing:1, marginBottom:6 }}>
+                              {m.resultado_local !== null ? 'Marcador actual' : 'Partido en curso'}
+                            </div>
+                          )}
+                          {/* Equipos + marcador */}
                           <div className="teams" style={{ marginBottom:6 }}>
                             <div className="team">
                               <div className="fl">{m.flag_local}</div>
                               <div className="tn">{m.equipo_local}</div>
                             </div>
-                            <div style={{ minWidth:60, textAlign:'center', fontFamily:"'Anton',sans-serif", fontSize:22, color:'var(--txt)', letterSpacing:1 }}>
+                            <div style={{ minWidth:60, textAlign:'center',
+                              fontFamily:"'Anton',sans-serif",
+                              fontSize: m.en_vivo ? 26 : 22,
+                              color: m.en_vivo ? '#ff2e2e' : 'var(--txt)',
+                              letterSpacing:1 }}>
                               {m.resultado_local !== null ? `${m.resultado_local}–${m.resultado_visitante}` : '–'}
                             </div>
                             <div className="team">
@@ -682,9 +706,11 @@ export default function PollAdmin() {
                         </>
                       )}
 
-                      {m.cerrado
-                        ? <div className="ofline set">⚡ Resultado sincronizado automáticamente</div>
-                        : <div className="ofline pend">Apuestas abiertas · se cierran al arrancar el partido</div>}
+                      {m.en_vivo
+                        ? <div className="ofline set" style={{ color:'rgba(255,90,95,.9)', borderColor:'rgba(255,90,95,.3)' }}>⚽ En vivo · score se actualiza automáticamente</div>
+                        : m.cerrado
+                          ? <div className="ofline set">✓ Resultado final sincronizado</div>
+                          : <div className="ofline pend">Apuestas abiertas · se cierran al arrancar el partido</div>}
                     </div>
                   )
                 })}
