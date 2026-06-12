@@ -171,8 +171,8 @@ export default function PollPlayer() {
       ...m,
       resultado_local:     resMap[m.id]?.resultado_local     ?? null,
       resultado_visitante: resMap[m.id]?.resultado_visitante ?? null,
-      // Cerrado si: admin lo cerró EN ESTA POLLA o la hora de inicio ya pasó
-      cerrado: resMap[m.id]?.cerrado ?? (m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false),
+      // Cerrado si: partido terminó (cerrado=true en DB) O ya pasó el kick-off
+      cerrado: (resMap[m.id]?.cerrado === true) || (m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false),
     }))
     setMatches(ms)
     setMyMember(memberData as PollMember | null)

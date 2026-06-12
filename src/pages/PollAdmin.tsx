@@ -191,11 +191,13 @@ export default function PollAdmin() {
     // Mezclar partidos globales con resultados específicos de esta polla
     const resMap: Record<string, PollResultado> = {}
     ;(resultadosData || []).forEach((r: PollResultado) => { resMap[r.partido_id] = r })
+    const now = new Date()
     const ms = ((matchesData || []) as Partido[]).map(m => ({
       ...m,
       resultado_local:     resMap[m.id]?.resultado_local     ?? null,
       resultado_visitante: resMap[m.id]?.resultado_visitante ?? null,
-      cerrado:             resMap[m.id]?.cerrado             ?? false,
+      // Cerrado si: partido terminó (cerrado=true en DB) O ya pasó el kick-off
+      cerrado: (resMap[m.id]?.cerrado === true) || (m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false),
     }))
 
     setPoll(p)

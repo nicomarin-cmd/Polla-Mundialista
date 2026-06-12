@@ -194,8 +194,11 @@ Deno.serve(async (req) => {
       const kickoff = new Date(am.utcDate)
       if (kickoff > now) continue
 
-      const ft = am.score?.fullTime
-      if (ft?.home === null || ft?.home === undefined) continue
+      // fullTime durante el partido puede ser null → usar halfTime como fallback
+      const ft = (am.score?.fullTime?.home != null)
+        ? am.score.fullTime
+        : am.score?.halfTime
+      if (!ft || ft.home === null || ft.home === undefined) continue
 
       const isHomeLocal  = homeEs === dbPartido.equipo_local
       const golesLocal   = isHomeLocal ? ft.home : ft.away
