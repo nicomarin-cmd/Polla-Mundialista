@@ -48,6 +48,7 @@ const TEAM_MAP: Record<string, string> = {
   'Indonesia': 'Indonesia', 'Thailand': 'Tailandia', 'Vietnam': 'Vietnam',
   'Iraq': 'Irak', 'Jordan': 'Jordania', 'Oman': 'Omán', 'Bahrain': 'Baréin',
   'Morocco': 'Marruecos', 'Senegal': 'Senegal',
+  'Haiti': 'Haití', 'Curaçao': 'Curazao',
 }
 
 // Emoji de banderas
@@ -70,7 +71,8 @@ const FLAG_MAP: Record<string, string> = {
   'Rumania': '🇷🇴', 'Hungría': '🇭🇺', 'Eslovaquia': '🇸🇰', 'Austria': '🇦🇹',
   'Dinamarca': '🇩🇰', 'Suecia': '🇸🇪', 'Noruega': '🇳🇴', 'Grecia': '🇬🇷',
   'China': '🇨🇳', 'Indonesia': '🇮🇩', 'Tailandia': '🇹🇭', 'Vietnam': '🇻🇳',
-  'Irak': '🇮🇶', 'Jordania': '🇯🇴', 'Omán': '🇴🇲', 'Baréin': '🇧🇭',
+  'Irak': '🇮🶺', 'Jordania': '🇯🇴', 'Omán': '🇴🇲', 'Baréin': '🇧🇭',
+  'Haití': '🇭🇹', 'Ganador IC1': '🏳️', 'Ganador IC2': '🏳️',
 }
 
 // Etapas del torneo (API → español)
@@ -205,16 +207,18 @@ Deno.serve(async (req) => {
           dbPartido.api_match_id = am.id
           byApiId.set(am.id, dbPartido)
         }
-        // Actualizar fecha_inicio (y fecha/fecha_fin) si difiere de la API (fuente de verdad UTC)
-        const apiDateNorm = new Date(am.utcDate).toISOString()
-        const dbDateNorm  = dbPartido.fecha_inicio ? new Date(dbPartido.fecha_inicio).toISOString() : null
-        if (dbDateNorm !== apiDateNorm) {
-          updates.fecha_inicio = am.utcDate
-          updates.fecha        = formatFecha(am.utcDate)   // recalcular display en hora Colombia
-          dbPartido.fecha_inicio = am.utcDate
-          // Recomputar fecha_fin con el kickoff correcto
-          const bufferMin = am.stage === 'GROUP_STAGE' ? 110 : 150
-          updates.fecha_fin = new Date(new Date(am.utcDate).getTime() + bufferMin * 60 * 1000).toISOString()
+        // Para eliminatorias: actualizar fecha_inicio desde la API (el horario se confirma tarde).
+        // Para fase de grupos: NO sobreescribir — los horarios vienen de la migración 010 (confirmados
+        // por el usuario). La API del plan gratuito puede tener horarios incorrectos para el WC 2026.
+        if (am.stage !== 'GROUP_STAGE') {
+          const apiDateNorm = new Date(am.utcDate).toISOString()
+          const dbDateNorm  = dbPartido.fecha_inicio ? new Date(dbPartido.fecha_inicio).toISOString() : null
+          if (dbDateNorm !== apiDateNorm) {
+            updates.fecha_inicio = am.utcDate
+            updates.fecha        = formatFecha(am.utcDate)
+            dbPartido.fecha_inicio = am.utcDate
+            updates.fecha_fin = new Date(new Date(am.utcDate).getTime() + 150 * 60 * 1000).toISOString()
+          }
         }
         if (Object.keys(updates).length > 0) {
           await db.from('partidos').update(updates).eq('id', dbPartido.id)
@@ -249,7 +253,15 @@ Deno.serve(async (req) => {
       const golesLocal   = isHomeLocal ? ft.home : ft.away
       const golesVisita  = isHomeLocal ? ft.away : ft.home
 
-      // ── 4. Actualizar poll_resultados para todas las pollas activas ────────
+      // ── 4a. Actualizar marcador en la tabla partidos (visualización global) ────
+      const partidoUpdate: Record<string, unknown> = {
+        resultado_local: golesLocal,
+        resultado_visitante: golesVisita,
+      }
+      if (isFinal) partidoUpdate.cerrado = true
+      await db.from('partidos').update(partidoUpdate).eq('id', dbPartido.id)
+
+      // ── 4b. Actualizar poll_resultados para todas las pollas activas ──────────
       const { data: pollas } = await db.from('pollas').select('id').eq('estado', 'abierta')
       if (!pollas?.length) continue
 
@@ -280,14 +292,14 @@ Deno.serve(async (req) => {
         synced++
       }
 
-      // Cuando el partido finaliza, registrar la hora real de fin en partidos.fecha_fin.
-      // Solo actualizamos si fecha_fin está en el futuro (era un estimado, no el real).
+      // Cuando el partido finaliza, sellar fecha_fin con la hora real
+      // (solo si el estimado aún es futuro: evita sobreescribir una hora real ya guardada)
       if (isFinal) {
         const nowIso = new Date().toISOString()
         await db.from('partidos')
           .update({ fecha_fin: nowIso })
           .eq('id', dbPartido.id)
-          .gt('fecha_fin', nowIso)   // solo si el estimado aún no fue reemplazado
+          .gt('fecha_fin', nowIso)
       }
     }
 

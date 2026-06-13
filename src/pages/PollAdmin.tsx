@@ -190,7 +190,7 @@ export default function PollAdmin() {
       { data: adminPredsData },
     ] = await Promise.all([
       supabase.from('pollas').select('*').eq('id', pollId).single(),
-      supabase.from('partidos').select('*').order('orden'),
+      supabase.from('partidos').select('*').order('fecha_inicio', { ascending: true, nullsFirst: false }).order('orden'),
       supabase.from('poll_members').select('*, profiles(nombre)').eq('poll_id', pollId).order('joined_at'),
       supabase.from('poll_resultados').select('*').eq('poll_id', pollId),
       supabase.from('poll_members').select('pagado').eq('poll_id', pollId).eq('user_id', userId).single(),

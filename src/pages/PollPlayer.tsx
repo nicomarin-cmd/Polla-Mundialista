@@ -164,7 +164,7 @@ export default function PollPlayer() {
       { data: resultadosData },
     ] = await Promise.all([
       supabase.from('pollas').select('*').eq('id', pollId).single(),
-      supabase.from('partidos').select('*').order('orden'),
+      supabase.from('partidos').select('*').order('fecha_inicio', { ascending: true, nullsFirst: false }).order('orden'),
       supabase.from('poll_members').select('*').eq('poll_id', pollId).eq('user_id', userId).single(),
       supabase.from('predicciones').select('*').eq('poll_id', pollId).eq('user_id', userId),
       supabase.from('poll_members').select('user_id, pagado').eq('poll_id', pollId),
