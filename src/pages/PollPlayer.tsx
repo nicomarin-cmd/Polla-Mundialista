@@ -23,6 +23,17 @@ type MajData = { local: number; draw: number; visitante: number; total: number }
 
 function fmt(n: number) { return Number(n).toFixed(2) }
 
+// Convierte un timestamp UTC a hora local de Colombia (UTC-5, sin horario de verano)
+function horaCO(utcDate: string | null): string {
+  if (!utcDate) return ''
+  const d = new Date(new Date(utcDate).getTime() - 5 * 60 * 60 * 1000)
+  const h = d.getUTCHours()
+  const m = d.getUTCMinutes()
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 || 12
+  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`
+}
+
 function calcPoints(
   pred: { local: number; visitante: number } | undefined,
   match: Partido,
@@ -168,10 +179,12 @@ export default function PollPlayer() {
     ;(resultadosData || []).forEach((r: PollResultado) => { resMap[r.partido_id] = r })
     const now = new Date()
     const ms = ((matchesData || []) as Partido[]).map(m => {
-      const dbRow   = resMap[m.id]
-      const kickoff = m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false
-      const finalizado = dbRow?.cerrado === true
-      const enVivo  = kickoff && !finalizado
+      const dbRow      = resMap[m.id]
+      const kickoff    = m.fecha_inicio ? new Date(m.fecha_inicio) <= now : false
+      // 30 min de gracia: evita que un fecha_fin ligeramente incorrecto cierre el partido antes de tiempo
+      const pastFin    = m.fecha_fin ? new Date(new Date(m.fecha_fin).getTime() + 30 * 60 * 1000) <= now : false
+      const finalizado = dbRow?.cerrado === true || pastFin                    // fallback si cron tardó
+      const enVivo     = kickoff && !finalizado
       return {
         ...m,
         resultado_local:     dbRow?.resultado_local     ?? null,
@@ -544,7 +557,7 @@ export default function PollPlayer() {
                     return (
                       <div key={m.id} className="match">
                         <div className="when">
-                          <span>{m.fecha} · {m.fase}</span>
+                          <span>{m.fecha}{m.fecha_inicio ? ` · ${horaCO(m.fecha_inicio)}` : ''} · {m.fase}</span>
                           {m.destacado
                             ? <span className="star">⭐ Colombia</span>
                             : <span style={{ fontSize:9, color:'var(--muted)' }}>📌 apuesta</span>}
@@ -622,7 +635,7 @@ export default function PollPlayer() {
                             background: live ? 'rgba(255,90,95,.04)' : undefined,
                           }}>
                             <div className="when">
-                              <span>{m.fecha} · {m.fase}</span>
+                              <span>{m.fecha}{m.fecha_inicio ? ` · ${horaCO(m.fecha_inicio)}` : ''} · {m.fase}</span>
                               {live ? (
                                 <span style={{
                                   fontSize:9, fontWeight:700, color:'#fff',

@@ -31,7 +31,8 @@ export interface Partido {
   orden: number
   fase: string
   fecha: string
-  fecha_inicio: string | null   // timestamptz — auto-cierra apuestas al llegar
+  fecha_inicio: string | null   // timestamptz UTC — auto-cierra apuestas al llegar
+  fecha_fin: string | null      // timestamptz UTC — estimado o real; null si aún no migrado
   equipo_local: string
   equipo_visitante: string
   flag_local: string

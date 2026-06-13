@@ -88,7 +88,8 @@ function norm(name: string): string { return TEAM_MAP[name] ?? name }
 function flag(spanishName: string): string { return FLAG_MAP[spanishName] ?? '🏳️' }
 
 function formatFecha(utcDate: string): string {
-  const d = new Date(utcDate)
+  // Colombia es UTC-5 (sin horario de verano)
+  const d = new Date(new Date(utcDate).getTime() - 5 * 60 * 60 * 1000)
   const days  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
   const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
   return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]}`
@@ -142,6 +143,7 @@ Deno.serve(async (req) => {
 
     // ── 3. Procesar cada partido de la API ───────────────────────────────────
     let inserted = 0
+    let synced   = 0
     const now = new Date()
 
     for (const am of apiMatches) {
@@ -168,6 +170,8 @@ Deno.serve(async (req) => {
         // ── Partido de eliminatorias nuevo → insertarlo ──────────────────────
         const stageLabel = STAGE_MAP[am.stage] ?? am.stage
         const orden = (STAGE_ORDER[am.stage] ?? 100) + (am.matchday ?? 0)
+        // fecha_fin = kickoff + 150 min (cubre alargue + penaltis en eliminatorias)
+        const fechaFin = new Date(new Date(am.utcDate).getTime() + 150 * 60 * 1000).toISOString()
         const { data: newPartido, error: insErr } = await db
           .from('partidos')
           .insert({
@@ -175,6 +179,7 @@ Deno.serve(async (req) => {
             fase:             stageLabel,
             fecha:            formatFecha(am.utcDate),
             fecha_inicio:     am.utcDate,
+            fecha_fin:        fechaFin,
             equipo_local:     homeEs,
             equipo_visitante: awayEs,
             flag_local:       flag(homeEs),
@@ -191,17 +196,29 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Actualizar api_match_id y/o fecha_inicio en partidos ya existentes que les falte
-      if (dbPartido && (!dbPartido.api_match_id || !dbPartido.fecha_inicio)) {
+      // Siempre sincronizar api_match_id y fecha_inicio desde la API (fuente autoritativa).
+      // Esto corrige valores precargados en migraciones que puedan estar desajustados.
+      if (dbPartido) {
         const updates: Record<string, unknown> = {}
-        if (!dbPartido.api_match_id)  updates.api_match_id  = am.id
-        if (!dbPartido.fecha_inicio)  updates.fecha_inicio  = am.utcDate
-        await db.from('partidos').update(updates).eq('id', dbPartido.id)
         if (!dbPartido.api_match_id) {
+          updates.api_match_id = am.id
           dbPartido.api_match_id = am.id
           byApiId.set(am.id, dbPartido)
         }
-        if (!dbPartido.fecha_inicio) dbPartido.fecha_inicio = am.utcDate
+        // Actualizar fecha_inicio (y fecha/fecha_fin) si difiere de la API (fuente de verdad UTC)
+        const apiDateNorm = new Date(am.utcDate).toISOString()
+        const dbDateNorm  = dbPartido.fecha_inicio ? new Date(dbPartido.fecha_inicio).toISOString() : null
+        if (dbDateNorm !== apiDateNorm) {
+          updates.fecha_inicio = am.utcDate
+          updates.fecha        = formatFecha(am.utcDate)   // recalcular display en hora Colombia
+          dbPartido.fecha_inicio = am.utcDate
+          // Recomputar fecha_fin con el kickoff correcto
+          const bufferMin = am.stage === 'GROUP_STAGE' ? 110 : 150
+          updates.fecha_fin = new Date(new Date(am.utcDate).getTime() + bufferMin * 60 * 1000).toISOString()
+        }
+        if (Object.keys(updates).length > 0) {
+          await db.from('partidos').update(updates).eq('id', dbPartido.id)
+        }
       }
 
       // Solo actualizamos scores si el partido ya empezó
@@ -209,16 +226,28 @@ Deno.serve(async (req) => {
       const kickoff = new Date(am.utcDate)
       if (kickoff > now) continue
 
-      // fullTime durante el partido puede ser null → usar halfTime como fallback
-      const ft = (am.score?.fullTime?.home != null)
-        ? am.score.fullTime
-        : am.score?.halfTime
-      if (!ft || ft.home === null || ft.home === undefined) continue
+      const isFinal = ['FINISHED', 'AWARDED'].includes(am.status)
+
+      // Para partidos FINALIZADOS: usar SOLO fullTime para no bloquear con el marcador del 1er tiempo.
+      // Si la API aún no tiene fullTime disponible (lag), saltamos este run; el siguiente cron lo corrige.
+      // Para partidos EN VIVO: preferir fullTime, fallback a halfTime (muestra progreso parcial).
+      let ft: { home: number; away: number } | null = null
+      if (isFinal) {
+        if (am.score?.fullTime?.home != null && am.score?.fullTime?.away != null) {
+          ft = { home: am.score.fullTime.home as number, away: am.score.fullTime.away as number }
+        }
+      } else {
+        if (am.score?.fullTime?.home != null && am.score?.fullTime?.away != null) {
+          ft = { home: am.score.fullTime.home as number, away: am.score.fullTime.away as number }
+        } else if (am.score?.halfTime?.home != null && am.score?.halfTime?.away != null) {
+          ft = { home: am.score.halfTime.home as number, away: am.score.halfTime.away as number }
+        }
+      }
+      if (!ft) continue
 
       const isHomeLocal  = homeEs === dbPartido.equipo_local
       const golesLocal   = isHomeLocal ? ft.home : ft.away
       const golesVisita  = isHomeLocal ? ft.away : ft.home
-      const isFinal      = ['FINISHED', 'AWARDED'].includes(am.status)
 
       // ── 4. Actualizar poll_resultados para todas las pollas activas ────────
       const { data: pollas } = await db.from('pollas').select('id').eq('estado', 'abierta')
@@ -232,24 +261,40 @@ Deno.serve(async (req) => {
 
       const closedPollaIds = new Set((yaClausulados ?? []).map((r: any) => r.poll_id))
 
+      // Cuando isFinal=true: siempre actualizar (incluso si ya estaba cerrado) para corregir
+      // marcadores que se bloquearon con datos parciales en runs anteriores.
+      // Cuando isFinal=false: saltamos registros ya cerrados para no reabrir un partido finalizado.
+      // cerrado es monotónico: una vez true, nunca vuelve a false.
       const upserts = pollas
-        .filter((p: any) => !closedPollaIds.has(p.id))
+        .filter((p: any) => !closedPollaIds.has(p.id) || isFinal)
         .map((p: any) => ({
           poll_id:             p.id,
           partido_id:          dbPartido.id,
           resultado_local:     golesLocal,
           resultado_visitante: golesVisita,
-          cerrado:             isFinal,
+          cerrado:             isFinal || closedPollaIds.has(p.id),
         }))
 
       if (upserts.length > 0) {
         await db.from('poll_resultados').upsert(upserts, { onConflict: 'poll_id,partido_id' })
+        synced++
+      }
+
+      // Cuando el partido finaliza, registrar la hora real de fin en partidos.fecha_fin.
+      // Solo actualizamos si fecha_fin está en el futuro (era un estimado, no el real).
+      if (isFinal) {
+        const nowIso = new Date().toISOString()
+        await db.from('partidos')
+          .update({ fecha_fin: nowIso })
+          .eq('id', dbPartido.id)
+          .gt('fecha_fin', nowIso)   // solo si el estimado aún no fue reemplazado
       }
     }
 
     return json({
       ok: true,
       inserted_matches: inserted,
+      synced,
       timestamp: new Date().toISOString(),
     })
 
