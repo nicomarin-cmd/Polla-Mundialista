@@ -1,6 +1,6 @@
 // Edge Function: pay-inscripcion
-// Flujo EIP-3009 (USDC/USDT, gasless) o approve+transferFrom (cUSD).
-// Registra el pago en poll_payments y marca poll_members.pagado = true.
+// Verifica que el usuario transfirió el monto exacto al platform wallet on-chain.
+// El usuario paga su propio gas — no se requiere firma del operador.
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { ethers } from 'npm:ethers@6'
@@ -9,55 +9,41 @@ import {
   TOKEN_CONFIG, CELO_RPC, toAtomics,
 } from '../_shared/utils.ts'
 
-const ERC3009_ABI = [
-  'function receiveWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s) external',
-]
-
-const ERC20_ABI = [
-  'function transferFrom(address from, address to, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-]
+// keccak256("Transfer(address,address,uint256)")
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // ── Validar env vars al inicio ────────────────────────────────────────────
-    const supabaseUrl      = requireEnv('SUPABASE_URL')
-    const serviceRoleKey   = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
-    const operatorPrivKey  = requireEnv('PLATFORM_OPERATOR_PRIVATE_KEY')
-    const platformAddress  = validateAddress(requireEnv('PLATFORM_OPERATOR_ADDRESS'))
+    const supabaseUrl     = requireEnv('SUPABASE_URL')
+    const serviceRoleKey  = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
+    const platformAddress = validateAddress(requireEnv('PLATFORM_OPERATOR_ADDRESS'))
 
-    // ── 1. Auth JWT ───────────────────────────────────────────────────────────
+    // ── 1. Auth JWT ──────────────────────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) return json({ error: 'No autorizado' }, 401)
 
     const db = createClient(supabaseUrl, serviceRoleKey)
-
     const { data: { user }, error: authErr } = await db.auth.getUser(
       authHeader.replace('Bearer ', '')
     )
     if (authErr || !user) return json({ error: 'Token inválido' }, 401)
 
-    // ── 2. Parsear y validar body ─────────────────────────────────────────────
+    // ── 2. Parsear body ──────────────────────────────────────────────────────────
     const body = await req.json()
-    const { poll_id, token, flow, amount } = body
+    const { poll_id, token, tx_hash, amount } = body
 
-    if (!poll_id || !token || !flow || !amount) {
-      return json({ error: 'Faltan parámetros: poll_id, token, flow, amount' }, 400)
+    if (!poll_id || !token || !tx_hash || !amount) {
+      return json({ error: 'Faltan parámetros: poll_id, token, tx_hash, amount' }, 400)
     }
 
     const walletAddress = validateAddress(body.wallet_address)
-
     const tokenCfg = TOKEN_CONFIG[token]
     if (!tokenCfg) return json({ error: `Token no soportado: ${token}` }, 400)
 
-    if (flow !== 'eip3009' && flow !== 'approve') {
-      return json({ error: `Flujo inválido: ${flow}` }, 400)
-    }
-
-    // ── 3. Idempotencia ───────────────────────────────────────────────────────
-    const { data: existing } = await db
+    // ── 3. Idempotencia: pago ya confirmado ──────────────────────────────────────
+    const { data: existingPaid } = await db
       .from('poll_payments')
       .select('id, tx_hash, status')
       .eq('poll_id', poll_id)
@@ -65,11 +51,20 @@ Deno.serve(async (req) => {
       .in('status', ['confirmed', 'distributed'])
       .maybeSingle()
 
-    if (existing) {
-      return json({ success: true, tx_hash: existing.tx_hash, already_paid: true })
+    if (existingPaid) {
+      return json({ success: true, tx_hash: existingPaid.tx_hash, already_paid: true })
     }
 
-    // ── 4. Verificar membresía y estado de polla ──────────────────────────────
+    // Evitar re-uso del mismo tx_hash en cualquier polla
+    const { data: usedTx } = await db
+      .from('poll_payments')
+      .select('id')
+      .eq('tx_hash', tx_hash)
+      .maybeSingle()
+
+    if (usedTx) return json({ error: 'Esta transacción ya fue registrada' }, 400)
+
+    // ── 4. Verificar membresía y estado de polla ─────────────────────────────────
     const { data: membership } = await db
       .from('poll_members')
       .select('pagado, pollas(inscripcion, moneda, estado)')
@@ -81,64 +76,54 @@ Deno.serve(async (req) => {
 
     const polla = (membership as any).pollas
     if (polla.estado !== 'abierta') return json({ error: 'La polla ya está cerrada' }, 400)
+    if ((membership as any).pagado) return json({ success: true, already_paid: true })
 
-    // Verificar que el token del request coincide con el de la polla
     const pollToken = polla.moneda === 'USDT-celo' ? 'USDT' : polla.moneda === 'cUSD' ? 'cUSD' : 'USDC'
     if (token !== pollToken) {
       return json({ error: `Token incorrecto. Esta polla usa ${pollToken}` }, 400)
     }
 
-    // Verificar monto exacto (evita underpayments)
     const expectedAtomics = toAtomics(polla.inscripcion, tokenCfg.decimals)
     if (BigInt(amount) !== expectedAtomics) {
-      return json({ error: `Monto incorrecto. Esperado: ${expectedAtomics}` }, 400)
+      return json({ error: `Monto incorrecto. Esperado: ${expectedAtomics} atomics` }, 400)
     }
 
-    // ── 5. Preparar signer del operador ───────────────────────────────────────
+    // ── 5. Verificar tx on-chain ─────────────────────────────────────────────────
     const provider = new ethers.JsonRpcProvider(CELO_RPC)
-    const operatorWallet = new ethers.Wallet(operatorPrivKey, provider)
+    const receipt = await provider.getTransactionReceipt(tx_hash)
 
-    let txHash: string
-
-    if (flow === 'eip3009') {
-      // ── 6A. USDC / USDT: receiveWithAuthorization (gasless) ──────────────
-      const { signature, nonce, valid_before } = body
-      if (!signature || !nonce || !valid_before) {
-        return json({ error: 'Faltan parámetros de firma EIP-3009: signature, nonce, valid_before' }, 400)
-      }
-
-      const sig = (signature as string).startsWith('0x') ? signature.slice(2) : signature
-      const r = `0x${sig.slice(0, 64)}`
-      const s = `0x${sig.slice(64, 128)}`
-      let v = parseInt(sig.slice(128, 130), 16)
-      if (v < 27) v += 27 // Algunos wallets devuelven v=0/1
-
-      const contract = new ethers.Contract(tokenCfg.address, ERC3009_ABI, operatorWallet)
-      const tx = await contract.receiveWithAuthorization(
-        walletAddress, platformAddress,
-        BigInt(amount), 0n, BigInt(valid_before),
-        nonce, v, r, s
-      )
-      const receipt = await tx.wait(1)
-      txHash = receipt.hash
-
-    } else {
-      // ── 6B. cUSD: transferFrom (usuario aprobó on-chain previamente) ──────
-      const contract = new ethers.Contract(tokenCfg.address, ERC20_ABI, operatorWallet)
-
-      const allowance: bigint = await contract.allowance(walletAddress, platformAddress)
-      if (allowance < BigInt(amount)) {
-        return json({
-          error: `Allowance insuficiente (${allowance} wei < ${amount} wei). Aprobá primero en tu wallet.`,
-        }, 400)
-      }
-
-      const tx = await contract.transferFrom(walletAddress, platformAddress, BigInt(amount))
-      const receipt = await tx.wait(1)
-      txHash = receipt.hash
+    if (!receipt || receipt.status !== 1) {
+      return json({ error: 'Transacción no confirmada en Celo' }, 400)
     }
 
-    // ── 7. Registrar en DB (insert ANTES de marcar pagado) ───────────────────
+    // Parsear logs buscando Transfer(walletAddress → platformAddress, >= expectedAtomics)
+    let transferVerified = false
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== tokenCfg.address.toLowerCase()) continue
+      if (log.topics[0] !== TRANSFER_TOPIC) continue
+      if (log.topics.length < 3) continue
+
+      const from  = ('0x' + log.topics[1].slice(26)).toLowerCase()
+      const to    = ('0x' + log.topics[2].slice(26)).toLowerCase()
+      const value = BigInt(log.data)
+
+      if (
+        from  === walletAddress.toLowerCase() &&
+        to    === platformAddress.toLowerCase() &&
+        value >= expectedAtomics
+      ) {
+        transferVerified = true
+        break
+      }
+    }
+
+    if (!transferVerified) {
+      return json({
+        error: 'No se encontró una transferencia válida al monto correcto en esa transacción',
+      }, 400)
+    }
+
+    // ── 6. Registrar pago en DB ──────────────────────────────────────────────────
     const { error: insertErr } = await db.from('poll_payments').insert({
       poll_id,
       user_id:        user.id,
@@ -147,13 +132,12 @@ Deno.serve(async (req) => {
       chain:          'celo',
       chain_id:       42220,
       wallet_address: walletAddress,
-      tx_hash:        txHash,
+      tx_hash,
       status:         'confirmed',
     })
 
     if (insertErr) {
       console.error('[pay-inscripcion] Error insertando poll_payments:', insertErr.message)
-      // tx ya ocurrió on-chain; registrar igualmente para no perder el hash
     }
 
     await db
@@ -164,16 +148,15 @@ Deno.serve(async (req) => {
 
     return json({
       success:  true,
-      tx_hash:  txHash,
-      celoscan: `https://celoscan.io/tx/${txHash}`,
+      tx_hash,
+      celoscan: `https://celoscan.io/tx/${tx_hash}`,
     })
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Error interno'
     console.error('[pay-inscripcion]', msg)
-    // No exponer stack trace al cliente
     const isUserError = msg.includes('inválid') || msg.includes('faltante') || msg.includes('incorrecto')
-      || msg.includes('miembro') || msg.includes('cerrada') || msg.includes('Allowance')
-    return json({ error: isUserError ? msg : 'Error al procesar el pago' }, isUserError ? 400 : 500)
+      || msg.includes('miembro') || msg.includes('cerrada') || msg.includes('transacción')
+    return json({ error: isUserError ? msg : 'Error al verificar el pago' }, isUserError ? 400 : 500)
   }
 })

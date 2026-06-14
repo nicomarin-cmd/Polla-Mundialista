@@ -1,7 +1,9 @@
 // Edge Function: cerrar-polla
 // 1. Llama fn_cerrar_polla (SQL cierra la polla y calcula ganadores)
-// 2. Para pollas cripto: transfiere USDC/USDT/cUSD a cada ganador
+// 2. Para pollas cripto: transfiere USDC/USDT/cUSD a cada ganador (descontando 5% de comisión)
 // 3. Registra en poll_winners con tx_hash por ganador
+
+const PLATFORM_FEE = 0.05  // 5% de comisión de plataforma
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { ethers } from 'npm:ethers@6'
@@ -111,7 +113,9 @@ Deno.serve(async (req) => {
 
     for (const g of ganadores as any[]) {
       const walletAddress: string | undefined = walletByUser[g.user_id]
-      const amountAtomics = toAtomics(g.monto, tokenCfg.decimals)
+      // Descontar comisión de plataforma (5%) antes de transferir
+      const netMonto = Math.round(g.monto * (1 - PLATFORM_FEE) * 1e6) / 1e6
+      const amountAtomics = toAtomics(netMonto, tokenCfg.decimals)
 
       if (!walletAddress) {
         await db.from('poll_winners').insert({
@@ -131,13 +135,13 @@ Deno.serve(async (req) => {
 
         await db.from('poll_winners').insert({
           poll_id, user_id: g.user_id,
-          position: g.puesto, amount_token: g.monto,
+          position: g.puesto, amount_token: netMonto,
           token: tokenSymbol, wallet_address: safeWallet,
           tx_hash: txHash, status: 'sent',
         })
 
         distribution.push({
-          user_id: g.user_id, puesto: g.puesto, monto: g.monto,
+          user_id: g.user_id, puesto: g.puesto, monto: netMonto,
           wallet: safeWallet, tx_hash: txHash,
           celoscan: `https://celoscan.io/tx/${txHash}`,
           status: 'sent',
@@ -151,7 +155,7 @@ Deno.serve(async (req) => {
           token: tokenSymbol, wallet_address: walletAddress,
           tx_hash: null, status: 'failed',
         })
-        distribution.push({ user_id: g.user_id, puesto: g.puesto, monto: g.monto, status: 'failed', error: errMsg })
+        distribution.push({ user_id: g.user_id, puesto: g.puesto, monto: netMonto, status: 'failed', error: errMsg })
       }
     }
 
