@@ -50,7 +50,7 @@ export default function Pollas() {
   const [showCrear, setShowCrear] = useState(false)
   const [nombre, setNombre] = useState('')
   const [inscripcion, setInscripcion] = useState('2')
-  const [moneda, setMoneda] = useState('COP')
+  const [moneda, setMoneda] = useState('USDC-celo')
   const [alcance, setAlcance] = useState<Alcance>('mundial')
   const [creando, setCreando] = useState(false)
 
@@ -126,7 +126,7 @@ export default function Pollas() {
 
       setNombre('')
       setInscripcion('2')
-      setMoneda('COP')
+      setMoneda('USDC-celo')
       setAlcance('mundial')
       setShowCrear(false)
       await fetchPollas()
@@ -266,32 +266,18 @@ export default function Pollas() {
               <label>Moneda</label>
               <select className="inp" value={moneda} onChange={e => setMoneda(e.target.value)}
                 style={{ cursor:'pointer' }}>
-                <optgroup label="Monedas fiat (pago manual)">
-                  <option value="COP">COP — Peso colombiano</option>
-                  <option value="USD">USD — Dólar estadounidense</option>
-                  <option value="EUR">EUR — Euro</option>
-                  <option value="MXN">MXN — Peso mexicano</option>
-                  <option value="ARS">ARS — Peso argentino</option>
-                  <option value="CLP">CLP — Peso chileno</option>
-                  <option value="PEN">PEN — Sol peruano</option>
-                  <option value="BRL">BRL — Real brasileño</option>
-                </optgroup>
-                <optgroup label="Cripto en Celo (pago on-chain)">
-                  <option value="USDC-celo">USDC — Celo blockchain (gasless)</option>
-                  <option value="USDT-celo">USDT — Celo blockchain (gasless)</option>
-                  <option value="cUSD">cUSD — Celo Dollar nativo (Mento)</option>
-                </optgroup>
+                <option value="USDC-celo">USDC — Dólar digital en Celo (recomendado)</option>
+                <option value="USDT-celo">USDT — Tether en Celo</option>
+                <option value="cUSD">cUSD — Celo Dollar nativo</option>
               </select>
-              {isCryptoMoneda(moneda) && (
-                <div style={{ marginTop:6, fontSize:10, color:'var(--lime)', background:'rgba(200,255,60,.08)',
-                  border:'1px solid rgba(200,255,60,.2)', borderRadius:8, padding:'7px 9px', lineHeight:1.5 }}>
-                  {moneda === 'cUSD'
-                    ? 'Los participantes pagarán con cUSD (Celo Dollar de Mento). Requieren CELO para gas de la aprobación.'
-                    : `Los participantes pagarán con ${moneda === 'USDT-celo' ? 'USDT' : 'USDC'} en la red Celo (firma gasless).`
-                  }
-                  {' '}Necesitarán conectar una wallet compatible (MetaMask, Coinbase Wallet, Valora).
-                </div>
-              )}
+              <div style={{ marginTop:6, fontSize:10, color:'var(--lime)', background:'rgba(200,255,60,.08)',
+                border:'1px solid rgba(200,255,60,.2)', borderRadius:8, padding:'7px 9px', lineHeight:1.5 }}>
+                {moneda === 'cUSD'
+                  ? 'Pago con cUSD en Celo. Requiere un poco de CELO para la aprobación (gas).'
+                  : `Pago con ${moneda === 'USDT-celo' ? 'USDT' : 'USDC'} en Celo — sin gas para el jugador.`
+                }
+                {' '}Los jugadores conectan MetaMask, Coinbase Wallet o Valora.
+              </div>
             </div>
             <div className="field">
               <label>Inscripción ({isCryptoMoneda(moneda) ? (moneda === 'USDT-celo' ? 'USDT' : moneda === 'cUSD' ? 'cUSD' : 'USDC') : moneda})</label>
