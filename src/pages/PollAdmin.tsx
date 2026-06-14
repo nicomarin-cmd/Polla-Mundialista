@@ -114,9 +114,6 @@ export default function PollAdmin() {
 
   const [syncing, setSyncing] = useState(false)
   const [closing, setClosing] = useState(false)
-  // Registro manual de resultados (fallback si API no responde)
-  const [pendingScores, setPendingScores] = useState<Record<string, { local: number; visitante: number }>>({})
-  const [savingScore, setSavingScore] = useState<Record<string, boolean>>({})
   // Wallets de los potenciales ganadores (cargadas cuando moneda es cripto)
   const [winnerWallets, setWinnerWallets] = useState<Record<string, string | null>>({})
   // Resultado de la distribución cripto (post-cierre)
@@ -156,25 +153,6 @@ export default function PollAdmin() {
       showToast('Error sync: ' + (err instanceof Error ? err.message : 'desconocido'))
     } finally {
       setSyncing(false)
-    }
-  }
-
-  const saveScore = async (matchId: string, final: boolean) => {
-    const score = pendingScores[matchId]
-    if (score == null || !pollId) return
-    setSavingScore(prev => ({ ...prev, [matchId]: true }))
-    const { error } = await supabase.from('poll_resultados').upsert({
-      poll_id: pollId,
-      partido_id: matchId,
-      resultado_local:     score.local,
-      resultado_visitante: score.visitante,
-      cerrado: final,
-    }, { onConflict: 'poll_id,partido_id' })
-    setSavingScore(prev => ({ ...prev, [matchId]: false }))
-    if (error) showToast('Error: ' + error.message)
-    else {
-      showToast(final ? 'Resultado final registrado ✓' : 'Marcador actualizado ✓')
-      await loadAll()
     }
   }
 
@@ -243,19 +221,6 @@ export default function PollAdmin() {
 
     setPoll(p)
     setMatches(ms)
-    // Inicializar marcadores manuales con lo que ya hay en la BD
-    setPendingScores(prev => {
-      const next = { ...prev }
-      ms.forEach(m => {
-        if (!(m.id in next)) {
-          next[m.id] = {
-            local:     m.resultado_local     ?? 0,
-            visitante: m.resultado_visitante ?? 0,
-          }
-        }
-      })
-      return next
-    })
     setMembers((membersData || []) as PollMemberWithProfile[])
     setMyMember(myMemberData as { pagado: boolean } | null)
 
@@ -751,59 +716,13 @@ export default function PollAdmin() {
                           <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8, textAlign:'center' }}>
                             Tu apuesta: <b style={{ color:'var(--txt)' }}>{pred ? `${pred.local}–${pred.visitante}` : 'Sin apuesta'}</b>
                           </div>
-
-                          {/* Entrada manual de resultado */}
-                          <div style={{ display:'flex', gap:6, alignItems:'center', justifyContent:'center', marginBottom:6 }}>
-                            <input
-                              type="number" min="0" max="30"
-                              value={pendingScores[m.id]?.local ?? 0}
-                              onChange={e => setPendingScores(prev => ({
-                                ...prev,
-                                [m.id]: { local: Math.max(0, parseInt(e.target.value) || 0), visitante: prev[m.id]?.visitante ?? 0 }
-                              }))}
-                              style={{ width:38, textAlign:'center', padding:'4px 2px', borderRadius:6,
-                                border:'1px solid var(--line)', background:'var(--panel-2)', color:'var(--txt)',
-                                fontFamily:"'Anton',sans-serif", fontSize:16 }}
-                            />
-                            <span style={{ color:'var(--muted)', fontFamily:"'Anton',sans-serif", fontSize:16 }}>–</span>
-                            <input
-                              type="number" min="0" max="30"
-                              value={pendingScores[m.id]?.visitante ?? 0}
-                              onChange={e => setPendingScores(prev => ({
-                                ...prev,
-                                [m.id]: { local: prev[m.id]?.local ?? 0, visitante: Math.max(0, parseInt(e.target.value) || 0) }
-                              }))}
-                              style={{ width:38, textAlign:'center', padding:'4px 2px', borderRadius:6,
-                                border:'1px solid var(--line)', background:'var(--panel-2)', color:'var(--txt)',
-                                fontFamily:"'Anton',sans-serif", fontSize:16 }}
-                            />
-                            {m.en_vivo ? (
-                              <button
-                                onClick={() => saveScore(m.id, false)}
-                                disabled={savingScore[m.id]}
-                                style={{ fontSize:9, padding:'5px 10px', borderRadius:6, border:'1px solid rgba(255,90,95,.4)',
-                                  background:'rgba(255,90,95,.08)', color:'#ff5a5f', cursor:'pointer', fontWeight:700 }}
-                              >
-                                {savingScore[m.id] ? '…' : '↻ Actualizar'}
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => saveScore(m.id, true)}
-                                disabled={savingScore[m.id]}
-                                style={{ fontSize:9, padding:'5px 10px', borderRadius:6, border:'1px solid rgba(200,255,60,.3)',
-                                  background:'rgba(200,255,60,.08)', color:'var(--lime)', cursor:'pointer', fontWeight:700 }}
-                              >
-                                {savingScore[m.id] ? '…' : '✓ Registrar final'}
-                              </button>
-                            )}
-                          </div>
                         </>
                       )}
 
                       {m.en_vivo
-                        ? <div className="ofline set" style={{ color:'rgba(255,90,95,.9)', borderColor:'rgba(255,90,95,.3)' }}>⚽ En vivo · score se actualiza por API cada minuto</div>
+                        ? <div className="ofline set" style={{ color:'rgba(255,90,95,.9)', borderColor:'rgba(255,90,95,.3)' }}>⚽ En vivo · score se actualiza automáticamente</div>
                         : m.cerrado
-                          ? <div className="ofline set">✓ Resultado final</div>
+                          ? <div className="ofline set">✓ Resultado final sincronizado</div>
                           : <div className="ofline pend">Apuestas abiertas · se cierran al arrancar el partido</div>}
                     </div>
                   )
