@@ -191,11 +191,7 @@ export default function PollPlayer() {
   const [tabla, setTabla] = useState<TablaRow[]>([])
   const [ganadores, setGanadores] = useState<GanadorWithProfile[]>([])
   const [pagadosCount, setPagadosCount] = useState(0)
-  const [activeTab, setActiveTab] = useState<'play' | 'results' | 'board' | 'chat'>('play')
-  const [mensajes, setMensajes] = useState<PollMensaje[]>([])
-  const [nuevoMensaje, setNuevoMensaje] = useState('')
-  const [enviandoMensaje, setEnviandoMensaje] = useState(false)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const [activeTab, setActiveTab] = useState<'play' | 'results' | 'board' | 'admin'>('play')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saved'>('idle')
@@ -206,7 +202,6 @@ export default function PollPlayer() {
   // Admin display name y contacto
   const [adminName, setAdminName] = useState('')
   const [adminContacto, setAdminContacto] = useState<{ email: string | null; telefono: string | null } | null>(null)
-  const [showContactoModal, setShowContactoModal] = useState(false)
   // Majority vote data (only for closed matches)
   const [majority, setMajority] = useState<Record<string, MajData>>({})
   const [majorityModal, setMajorityModal] = useState<string | null>(null)
@@ -383,50 +378,6 @@ export default function PollPlayer() {
     return () => { supabase.removeChannel(channel); clearInterval(fallback) }
   }, [pollId, loadAll, matches])
 
-  // Mensajes: carga inicial + Realtime
-  const loadMensajes = useCallback(async () => {
-    if (!pollId) return
-    const { data } = await supabase
-      .from('poll_mensajes')
-      .select('*, profiles(nombre)')
-      .eq('poll_id', pollId)
-      .order('created_at', { ascending: true })
-    setMensajes((data || []) as PollMensaje[])
-  }, [pollId])
-
-  useEffect(() => { loadMensajes() }, [loadMensajes])
-
-  useEffect(() => {
-    if (!pollId) return
-    const ch = supabase
-      .channel(`chat-${pollId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'poll_mensajes', filter: `poll_id=eq.${pollId}` },
-        () => { loadMensajes() })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'poll_mensajes', filter: `poll_id=eq.${pollId}` },
-        () => { loadMensajes() })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [pollId, loadMensajes])
-
-  useEffect(() => {
-    if (activeTab === 'chat') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [mensajes, activeTab])
-
-  const enviarMensaje = async () => {
-    if (!session || !pollId || !nuevoMensaje.trim()) return
-    setEnviandoMensaje(true)
-    await supabase.from('poll_mensajes').insert({
-      poll_id: pollId,
-      user_id: session.user.id,
-      mensaje: nuevoMensaje.trim(),
-    })
-    setNuevoMensaje('')
-    setEnviandoMensaje(false)
-  }
-
-  const borrarMensaje = async (id: string) => {
-    await supabase.from('poll_mensajes').delete().eq('id', id)
-  }
 
   const updatePred = (matchId: string, side: 'local' | 'visitante', delta: number) => {
     dirtyMatchIds.current.add(matchId)
@@ -608,18 +559,8 @@ export default function PollPlayer() {
               Bote total · {pagadosCount} pagados · {fmt(poll.inscripcion)} {poll.moneda} c/u
             </div>
             {adminName && (
-              <div style={{ marginTop:6, display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+              <div style={{ marginTop:6 }}>
                 <span className="admin-chip">🛡️ Organiza: {adminName}</span>
-                {(adminContacto?.email || adminContacto?.telefono) && (
-                  <button
-                    onClick={() => setShowContactoModal(true)}
-                    style={{ fontSize:10, padding:'3px 10px', borderRadius:20,
-                      border:'1px solid rgba(200,255,60,.3)', background:'rgba(200,255,60,.08)',
-                      color:'var(--lime)', cursor:'pointer', fontWeight:700 }}
-                  >
-                    Contactar
-                  </button>
-                )}
               </div>
             )}
             <div className="rowx">
@@ -665,9 +606,7 @@ export default function PollPlayer() {
             <div className={`tab ${activeTab === 'play' ? 'on' : ''}`} onClick={() => setActiveTab('play')}>Apuestas</div>
             <div className={`tab ${activeTab === 'results' ? 'on' : ''}`} onClick={() => setActiveTab('results')}>Resultados</div>
             <div className={`tab ${activeTab === 'board' ? 'on' : ''}`} onClick={() => setActiveTab('board')}>Tabla</div>
-            <div className={`tab ${activeTab === 'chat' ? 'on' : ''}`} onClick={() => setActiveTab('chat')}>
-              Mensajes{mensajes.length > 0 && <span style={{ marginLeft:4, fontSize:9, background:'var(--lime)', color:'#000', borderRadius:8, padding:'1px 5px', fontWeight:900 }}>{mensajes.length}</span>}
-            </div>
+            <div className={`tab ${activeTab === 'admin' ? 'on' : ''}`} onClick={() => setActiveTab('admin')}>Admin</div>
           </div>
 
           {/* ---- TAB: Apuestas ---- */}
@@ -1017,81 +956,52 @@ export default function PollPlayer() {
             </div>
           )}
 
-          {/* ---- TAB: Mensajes ---- */}
-          {activeTab === 'chat' && (
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              <div style={{ fontSize:11, color:'var(--muted)', padding:'4px 0 8px' }}>
-                Mensajes del grupo · {mensajes.length} mensaje{mensajes.length !== 1 ? 's' : ''}
+          {/* ---- TAB: Admin ---- */}
+          {activeTab === 'admin' && (
+            <div className="acard">
+              <div className="h">🛡️ Info del organizador</div>
+              <div style={{ fontSize:11, color:'var(--muted)', marginBottom:16 }}>
+                Organiza esta polla: <b style={{ color:'var(--txt)' }}>{adminName || '—'}</b>
               </div>
-
-              {/* Lista de mensajes */}
-              {mensajes.length === 0 ? (
-                <div className="acard">
-                  <div className="d" style={{ textAlign:'center' }}>
-                    Sin mensajes todavía. ¡Sé el primero en escribir!
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                  {mensajes.map(m => {
-                    const esAdmin = poll.admin_id === m.user_id
-                    const esMio = session?.user.id === m.user_id
-                    return (
-                      <div key={m.id} style={{
-                        padding:'9px 12px', borderRadius:10,
-                        background: esAdmin ? 'rgba(200,255,60,.07)' : 'var(--panel-2)',
-                        border: esAdmin ? '1px solid rgba(200,255,60,.2)' : '1px solid var(--line)',
-                        alignSelf: esMio ? 'flex-end' : 'flex-start',
-                        maxWidth:'85%',
-                      }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
-                          <span style={{ fontSize:11, fontWeight:700, color: esAdmin ? 'var(--lime)' : 'var(--txt)' }}>
-                            {m.profiles?.nombre ?? '—'}
-                          </span>
-                          {esAdmin && <span style={{ fontSize:8, background:'rgba(200,255,60,.15)', color:'var(--lime)',
-                            borderRadius:6, padding:'1px 5px', fontWeight:900 }}>ADMIN</span>}
-                          <span style={{ fontSize:9, color:'var(--muted)', marginLeft:'auto' }}>
-                            {new Date(m.created_at).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })}
-                          </span>
-                          {(esMio || poll.admin_id === session?.user.id) && (
-                            <button onClick={() => borrarMensaje(m.id)}
-                              style={{ fontSize:9, color:'var(--muted)', background:'none', border:'none',
-                                cursor:'pointer', padding:'0 2px', lineHeight:1 }}>
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                        <div style={{ fontSize:12, color:'var(--txt)', lineHeight:1.5, wordBreak:'break-word' }}>
-                          {m.mensaje}
-                        </div>
+              {adminContacto ? (
+                <>
+                  {adminContacto.email && (
+                    <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 0',
+                      borderBottom: adminContacto.telefono ? '1px solid var(--line)' : 'none' }}>
+                      <span style={{ fontSize:22 }}>✉️</span>
+                      <div>
+                        <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Correo electrónico</div>
+                        <a href={`mailto:${adminContacto.email}`}
+                          style={{ color:'var(--lime)', fontSize:14, fontWeight:700, textDecoration:'none' }}>
+                          {adminContacto.email}
+                        </a>
                       </div>
-                    )
-                  })}
-                  <div ref={chatEndRef} />
+                    </div>
+                  )}
+                  {adminContacto.telefono && (
+                    <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 0' }}>
+                      <span style={{ fontSize:22 }}>💬</span>
+                      <div>
+                        <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>WhatsApp / Teléfono</div>
+                        <a href={`https://wa.me/${adminContacto.telefono.replace(/\D/g, '')}`}
+                          target="_blank" rel="noopener noreferrer"
+                          style={{ color:'var(--lime)', fontSize:14, fontWeight:700, textDecoration:'none' }}>
+                          {adminContacto.telefono}
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  {!adminContacto.email && !adminContacto.telefono && (
+                    <div className="d" style={{ textAlign:'center', padding:'12px 0' }}>
+                      El organizador aún no ha publicado su información de contacto.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="d" style={{ textAlign:'center', padding:'12px 0' }}>
+                  El organizador aún no ha publicado su información de contacto.
                 </div>
               )}
-
-              {/* Input para escribir */}
-              <div style={{ display:'flex', gap:8, marginTop:4, position:'sticky', bottom:0,
-                background:'var(--bg)', paddingBottom:8 }}>
-                <input
-                  className="inp"
-                  style={{ flex:1, margin:0 }}
-                  placeholder="Escribe un mensaje…"
-                  value={nuevoMensaje}
-                  maxLength={500}
-                  onChange={e => setNuevoMensaje(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarMensaje() } }}
-                />
-                <button
-                  className="save"
-                  style={{ margin:0, padding:'0 16px', flexShrink:0 }}
-                  onClick={enviarMensaje}
-                  disabled={enviandoMensaje || !nuevoMensaje.trim()}
-                >
-                  Enviar
-                </button>
-              </div>
             </div>
           )}
         </div>
@@ -1122,48 +1032,6 @@ export default function PollPlayer() {
         )
       })()}
 
-      {/* Modal de contacto del admin */}
-      {showContactoModal && adminContacto && (
-        <div className="overlay" onClick={() => setShowContactoModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-head">
-              <div className="modal-title">🛡️ Contactar al admin</div>
-              <button className="modal-close" onClick={() => setShowContactoModal(false)}>×</button>
-            </div>
-            <div style={{ marginBottom:8 }}>
-              <div style={{ fontSize:11, color:'var(--muted)', marginBottom:12 }}>
-                Organiza esta polla: <b style={{ color:'var(--txt)' }}>{adminName}</b>
-              </div>
-              {adminContacto.email && (
-                <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0',
-                  borderBottom: adminContacto.telefono ? '1px solid var(--line)' : 'none' }}>
-                  <span style={{ fontSize:18 }}>✉️</span>
-                  <div>
-                    <div style={{ fontSize:10, color:'var(--muted)', marginBottom:2 }}>Correo electrónico</div>
-                    <a href={`mailto:${adminContacto.email}`}
-                      style={{ color:'var(--lime)', fontSize:13, fontWeight:700, textDecoration:'none' }}>
-                      {adminContacto.email}
-                    </a>
-                  </div>
-                </div>
-              )}
-              {adminContacto.telefono && (
-                <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0' }}>
-                  <span style={{ fontSize:18 }}>💬</span>
-                  <div>
-                    <div style={{ fontSize:10, color:'var(--muted)', marginBottom:2 }}>WhatsApp / Teléfono</div>
-                    <a href={`https://wa.me/${adminContacto.telefono.replace(/\D/g, '')}`}
-                      target="_blank" rel="noopener noreferrer"
-                      style={{ color:'var(--lime)', fontSize:13, fontWeight:700, textDecoration:'none' }}>
-                      {adminContacto.telefono}
-                    </a>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
