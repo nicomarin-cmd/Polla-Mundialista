@@ -101,11 +101,6 @@ export default function PollAdmin() {
   const [cancelResult, setCancelResult] = useState<RefundResult[]>([])
   // Pagos cripto registrados (para tabla en Personas)
   const [payments, setPayments] = useState<PollPayment[]>([])
-  // Mensajes del grupo
-  const [mensajes, setMensajes] = useState<PollMensaje[]>([])
-  const [nuevoMensaje, setNuevoMensaje] = useState('')
-  const [enviandoMensaje, setEnviandoMensaje] = useState(false)
-  const chatEndRef = useRef<HTMLDivElement>(null)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -282,50 +277,6 @@ export default function PollAdmin() {
     }
   }, [loading, poll, session, pollId, navigate])
 
-  // Mensajes: carga inicial + Realtime
-  const loadMensajes = useCallback(async () => {
-    if (!pollId) return
-    const { data } = await supabase
-      .from('poll_mensajes')
-      .select('*, profiles(nombre)')
-      .eq('poll_id', pollId)
-      .order('created_at', { ascending: true })
-    setMensajes((data || []) as PollMensaje[])
-  }, [pollId])
-
-  useEffect(() => { loadMensajes() }, [loadMensajes])
-
-  useEffect(() => {
-    if (!pollId) return
-    const ch = supabase
-      .channel(`admin-chat-${pollId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'poll_mensajes', filter: `poll_id=eq.${pollId}` },
-        () => { loadMensajes() })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'poll_mensajes', filter: `poll_id=eq.${pollId}` },
-        () => { loadMensajes() })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [pollId, loadMensajes])
-
-  useEffect(() => {
-    if (activeTab === 'people') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [mensajes, activeTab])
-
-  const enviarMensaje = async () => {
-    if (!session || !pollId || !nuevoMensaje.trim()) return
-    setEnviandoMensaje(true)
-    await supabase.from('poll_mensajes').insert({
-      poll_id: pollId,
-      user_id: session.user.id,
-      mensaje: nuevoMensaje.trim(),
-    })
-    setNuevoMensaje('')
-    setEnviandoMensaje(false)
-  }
-
-  const borrarMensaje = async (id: string) => {
-    await supabase.from('poll_mensajes').delete().eq('id', id)
-  }
 
   const togglePagado = async (member: PollMemberWithProfile) => {
     const { error } = await supabase.from('poll_members')
@@ -734,10 +685,12 @@ export default function PollAdmin() {
                 )}
               </div>
 
-              <div className="acard">
-                <div className="h">Tu contacto (visible para los jugadores)</div>
-                <div className="d" style={{ marginBottom:10 }}>
-                  Los jugadores verán esta info en la página de la polla para contactarte directamente.
+              <div className="acard" style={{ border:'1px solid rgba(200,255,60,.35)' }}>
+                <div className="h" style={{ color:'var(--lime)' }}>📋 Tu info de contacto · visible públicamente</div>
+                <div style={{ fontSize:11, color:'var(--muted)', background:'rgba(200,255,60,.07)',
+                  border:'1px solid rgba(200,255,60,.2)', borderRadius:8, padding:'8px 10px',
+                  marginBottom:12, lineHeight:1.6 }}>
+                  <b style={{ color:'var(--lime)' }}>Obligatorio:</b> los jugadores ven esta información en la polla para saber quién eres y cómo contactarte. Sin estos datos, nadie puede localizarte si tiene dudas con el pago o las reglas.
                 </div>
                 <div className="field">
                   <label>Correo electrónico</label>
@@ -923,68 +876,6 @@ export default function PollAdmin() {
                 </div>
               )}
 
-              {/* Mensajes del grupo */}
-              <div className="acard" style={{ marginTop:10 }}>
-                <div className="h">
-                  Mensajes del grupo
-                  {mensajes.length > 0 && <span className="badge open" style={{ marginLeft:6 }}>{mensajes.length}</span>}
-                </div>
-                <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:6 }}>
-                  {mensajes.length === 0 ? (
-                    <div className="d" style={{ textAlign:'center' }}>Sin mensajes todavía.</div>
-                  ) : (
-                    mensajes.map(m => {
-                      const esAdmin = poll.admin_id === m.user_id
-                      return (
-                        <div key={m.id} style={{
-                          padding:'8px 10px', borderRadius:8,
-                          background: esAdmin ? 'rgba(200,255,60,.07)' : 'var(--bg)',
-                          border: esAdmin ? '1px solid rgba(200,255,60,.2)' : '1px solid var(--line)',
-                        }}>
-                          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
-                            <span style={{ fontSize:11, fontWeight:700, color: esAdmin ? 'var(--lime)' : 'var(--txt)' }}>
-                              {m.profiles?.nombre ?? '—'}
-                            </span>
-                            {esAdmin && <span style={{ fontSize:8, background:'rgba(200,255,60,.15)', color:'var(--lime)',
-                              borderRadius:6, padding:'1px 5px', fontWeight:900 }}>TÚ (ADMIN)</span>}
-                            <span style={{ fontSize:9, color:'var(--muted)', marginLeft:'auto' }}>
-                              {new Date(m.created_at).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })}
-                            </span>
-                            <button onClick={() => borrarMensaje(m.id)}
-                              style={{ fontSize:9, color:'var(--muted)', background:'none', border:'none',
-                                cursor:'pointer', padding:'0 2px' }}>
-                              ✕
-                            </button>
-                          </div>
-                          <div style={{ fontSize:12, color:'var(--txt)', lineHeight:1.5, wordBreak:'break-word' }}>
-                            {m.mensaje}
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                  <div ref={chatEndRef} />
-                </div>
-                <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                  <input
-                    className="inp"
-                    style={{ flex:1, margin:0 }}
-                    placeholder="Responde al grupo…"
-                    value={nuevoMensaje}
-                    maxLength={500}
-                    onChange={e => setNuevoMensaje(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarMensaje() } }}
-                  />
-                  <button
-                    className="save gold"
-                    style={{ margin:0, padding:'0 14px', flexShrink:0 }}
-                    onClick={enviarMensaje}
-                    disabled={enviandoMensaje || !nuevoMensaje.trim()}
-                  >
-                    Enviar
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 

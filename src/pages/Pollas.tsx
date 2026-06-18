@@ -23,6 +23,8 @@ export default function Pollas() {
   const [nombre, setNombre] = useState('')
   const [inscripcion, setInscripcion] = useState('2')
   const [moneda, setMoneda] = useState('USDC-celo')
+  const [contactoEmail, setContactoEmail] = useState('')
+  const [contactoTel, setContactoTel] = useState('')
   const [creando, setCreando] = useState(false)
 
   const joinParam = searchParams.get('join')
@@ -95,9 +97,18 @@ export default function Pollas() {
       })
       if (errMiembro) throw new Error(errMiembro.message)
 
+      if (contactoEmail.trim() || contactoTel.trim()) {
+        await supabase.from('profiles').update({
+          contacto_email: contactoEmail.trim() || null,
+          contacto_telefono: contactoTel.trim() || null,
+        }).eq('id', session.user.id)
+      }
+
       setNombre('')
       setInscripcion('2')
       setMoneda('USDC-celo')
+      setContactoEmail('')
+      setContactoTel('')
       setShowCrear(false)
       await fetchPollas()
       navigate(`/pollas/${newPoll.id}/admin`)
@@ -251,6 +262,26 @@ export default function Pollas() {
                 onChange={e => setInscripcion(e.target.value)}
                 placeholder="Ej: 20000"
               />
+            </div>
+            <div style={{ borderTop:'1px solid var(--line)', paddingTop:14, marginTop:4 }}>
+              <div style={{ fontSize:11, color:'var(--lime)', fontWeight:700, marginBottom:4 }}>
+                📋 Tu información de contacto · visible para los jugadores
+              </div>
+              <div style={{ fontSize:11, color:'var(--muted)', marginBottom:10, lineHeight:1.6 }}>
+                Los jugadores verán estos datos para saber quién organiza la polla y cómo contactarte. Sin esta info, nadie puede localizarte si tiene dudas con el pago.
+              </div>
+              <div className="field">
+                <label>Tu correo electrónico</label>
+                <input className="inp" type="email" value={contactoEmail}
+                  onChange={e => setContactoEmail(e.target.value)}
+                  placeholder="tu@correo.com" />
+              </div>
+              <div className="field">
+                <label>Tu WhatsApp / Teléfono</label>
+                <input className="inp" type="tel" value={contactoTel}
+                  onChange={e => setContactoTel(e.target.value)}
+                  placeholder="+57 300 000 0000" />
+              </div>
             </div>
             {error && <div className="err-msg">{error}</div>}
             <button className="save gold" onClick={crearPolla} disabled={creando || !nombre.trim()}>
