@@ -4,41 +4,13 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
 import { isCryptoMoneda } from '../lib/celoTokens'
-import type { Polla, Alcance } from '../types'
+import type { Polla } from '../types'
 
 function genCodigo() {
   return Math.random().toString(36).slice(2, 8).toUpperCase()
 }
 
 function fmt(n: number) { return Number(n).toFixed(2) }
-
-const ALCANCE_OPTS: { id: Alcance; ico: string; title: string; desc: string }[] = [
-  { id: 'mundial',       ico: '🌍', title: 'Todo el Mundial',     desc: 'Apostás en todos los partidos: grupos + eliminatorias' },
-  { id: 'grupos',        ico: '🏟️', title: 'Solo Fase de Grupos', desc: 'Solo los partidos de la fase de grupos (48 partidos)' },
-  { id: 'eliminatorias', ico: '⚡', title: 'Solo Eliminatorias',   desc: 'A partir de los 32avos de final hasta la gran final' },
-  { id: 'seleccion',     ico: '🎯', title: 'Partidos a elegir',    desc: 'El admin elige manualmente cuáles partidos entran' },
-]
-
-function alcanceLabel(a?: Alcance) {
-  return ALCANCE_OPTS.find(o => o.id === a)?.title ?? 'Todo el Mundial'
-}
-
-function ScopeSelector({ value, onChange }: { value: Alcance; onChange: (v: Alcance) => void }) {
-  return (
-    <div>
-      {ALCANCE_OPTS.map(o => (
-        <div key={o.id} className={`scope-opt ${value === o.id ? 'on' : ''}`} onClick={() => onChange(o.id)}>
-          <div className="sico">{o.ico}</div>
-          <div className="sinfo">
-            <div className="stitle">{o.title}</div>
-            <div className="sdesc">{o.desc}</div>
-          </div>
-          <div className="scheck" />
-        </div>
-      ))}
-    </div>
-  )
-}
 
 export default function Pollas() {
   const { session, profile } = useAuth()
@@ -51,7 +23,6 @@ export default function Pollas() {
   const [nombre, setNombre] = useState('')
   const [inscripcion, setInscripcion] = useState('2')
   const [moneda, setMoneda] = useState('USDC-celo')
-  const [alcance, setAlcance] = useState<Alcance>('mundial')
   const [creando, setCreando] = useState(false)
 
   const joinParam = searchParams.get('join')
@@ -111,7 +82,7 @@ export default function Pollas() {
           admin_id: session.user.id,
           inscripcion: isNaN(inscripcionNum) ? 2 : inscripcionNum,
           moneda,
-          reglas: { exacto: 5, resultado: 3, fallo: 0, alcance },
+          reglas: { exacto: 5, resultado: 3, fallo: 0 },
         })
         .select('id')
         .single()
@@ -127,7 +98,6 @@ export default function Pollas() {
       setNombre('')
       setInscripcion('2')
       setMoneda('USDC-celo')
-      setAlcance('mundial')
       setShowCrear(false)
       await fetchPollas()
       navigate(`/pollas/${newPoll.id}/admin`)
@@ -218,35 +188,26 @@ export default function Pollas() {
             </div>
           )}
 
-          {pollas.map(p => {
-            const alc = p.reglas?.alcance ?? 'mundial'
-            const alcOpt = ALCANCE_OPTS.find(o => o.id === alc)
-            return (
-              <div
-                key={p.id}
-                className="acard"
-                style={{ cursor:'pointer' }}
-                onClick={() => navigate(isAdmin(p) ? `/pollas/${p.id}/admin` : `/pollas/${p.id}`)}
-              >
-                <div className="h">
-                  {p.nombre}
-                  <span className={`badge ${p.estado === 'abierta' ? 'open' : 'closed'}`}>
-                    {p.estado === 'abierta' ? 'Abierta' : 'Cerrada'}
-                  </span>
-                </div>
-                <div className="d">
-                  Código: <b style={{ color:'var(--txt)', fontFamily:"'Anton',sans-serif" }}>{p.codigo}</b>
-                  {isAdmin(p) && <> · <span style={{ color:'var(--gold)' }}>Tú eres admin</span></>}
-                  {' '}· {fmt(p.inscripcion)} {p.moneda}
-                </div>
-                {alcOpt && (
-                  <div style={{ marginTop:6, fontSize:10, color:'var(--muted)' }}>
-                    {alcOpt.ico} {alcOpt.title}
-                  </div>
-                )}
+          {pollas.map(p => (
+            <div
+              key={p.id}
+              className="acard"
+              style={{ cursor:'pointer' }}
+              onClick={() => navigate(isAdmin(p) ? `/pollas/${p.id}/admin` : `/pollas/${p.id}`)}
+            >
+              <div className="h">
+                {p.nombre}
+                <span className={`badge ${p.estado === 'abierta' ? 'open' : 'closed'}`}>
+                  {p.estado === 'abierta' ? 'Abierta' : 'Cerrada'}
+                </span>
               </div>
-            )
-          })}
+              <div className="d">
+                Código: <b style={{ color:'var(--txt)', fontFamily:"'Anton',sans-serif" }}>{p.codigo}</b>
+                {isAdmin(p) && <> · <span style={{ color:'var(--gold)' }}>Tú eres admin</span></>}
+                {' '}· {fmt(p.inscripcion)} {p.moneda}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -290,18 +251,6 @@ export default function Pollas() {
                 onChange={e => setInscripcion(e.target.value)}
                 placeholder="Ej: 20000"
               />
-            </div>
-            <div className="field">
-              <label>¿Sobre qué partidos van a apostar?</label>
-              <div style={{ marginTop:4 }}>
-                <ScopeSelector value={alcance} onChange={setAlcance} />
-              </div>
-              {alcance === 'seleccion' && (
-                <div style={{ marginTop:6, fontSize:10, color:'var(--gold)', background:'rgba(255,194,75,.08)',
-                  border:'1px solid rgba(255,194,75,.2)', borderRadius:8, padding:'7px 9px', lineHeight:1.5 }}>
-                  ⚠ Después de crear la polla, ve a Admin → Reglas para elegir los partidos específicos.
-                </div>
-              )}
             </div>
             {error && <div className="err-msg">{error}</div>}
             <button className="save gold" onClick={crearPolla} disabled={creando || !nombre.trim()}>

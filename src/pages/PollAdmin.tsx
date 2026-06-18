@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
 import { isCryptoMoneda, celoscanTx, monedaToToken } from '../lib/celoTokens'
-import type { Polla, Partido, PollMemberWithProfile, TablaRow, Alcance, PollPayment, PollResultado } from '../types'
+import type { Polla, Partido, PollMemberWithProfile, TablaRow, PollPayment, PollResultado, PollMensaje } from '../types'
 
 interface WinnerDist {
   user_id: string
@@ -27,27 +27,6 @@ interface RefundResult {
   error?: string
 }
 
-const ALCANCE_OPTS: { id: Alcance; ico: string; title: string; desc: string }[] = [
-  { id: 'mundial',       ico: '🌍', title: 'Todo el Mundial',     desc: 'Todos los partidos: grupos + eliminatorias' },
-  { id: 'grupos',        ico: '🏟️', title: 'Solo Fase de Grupos', desc: 'Solo los 48 partidos de la fase de grupos' },
-  { id: 'eliminatorias', ico: '⚡', title: 'Solo Eliminatorias',   desc: 'Desde los 32avos hasta la gran final' },
-  { id: 'seleccion',     ico: '🎯', title: 'Partidos a elegir',    desc: 'Marcá manualmente cuáles partidos entran' },
-]
-
-function isGrupo(fase: string) { return /grupo/i.test(fase) }
-
-const EQUIPOS_TOP = new Set([
-  'Brasil','Brazil','Argentina','Francia','France','España','Spain',
-  'Alemania','Germany','Inglaterra','England','Portugal','México','Mexico',
-  'Uruguay','Holanda','Netherlands','Croacia','Croatia','Colombia',
-  'Bélgica','Belgium','Italia','Italy','Japón','Japan','Marruecos','Morocco',
-])
-
-function isFavorito(m: Partido) {
-  return m.destacado || EQUIPOS_TOP.has(m.equipo_local) || EQUIPOS_TOP.has(m.equipo_visitante)
-}
-
-type SelCategory = 'todos' | 'colombia' | 'favoritos' | 'grupos' | 'elim'
 
 const AVCOLS = ['#ffc24b','#d7ff3e','#37e29a','#ff8a3d','#7aa2ff','#ff5a5f','#b48bff','#4be0d6','#ff9ec4','#9bd35a']
 const MEDALS = ['🥇','🥈','🥉']
@@ -79,6 +58,9 @@ export default function PollAdmin() {
   const { session } = useAuth()
   const navigate = useNavigate()
 
+  const initialLoadDone = useRef(false)
+  const dirtyAdminMatchIds = useRef<Set<string>>(new Set())
+
   const [poll, setPoll] = useState<Polla | null>(null)
   const [matches, setMatches] = useState<Partido[]>([])
   const [members, setMembers] = useState<PollMemberWithProfile[]>([])
@@ -86,7 +68,6 @@ export default function PollAdmin() {
   const [activeTab, setActiveTab] = useState<'matches' | 'rules' | 'people' | 'close'>('matches')
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
-
 
   // Apuestas propias del admin (igual que PollPlayer)
   const [adminPreds, setAdminPreds] = useState<Record<string, { local: number; visitante: number }>>({})
@@ -100,19 +81,21 @@ export default function PollAdmin() {
   const [prem1, setPrem1] = useState(30)
   const [prem2, setPrem2] = useState(20)
   const [inscFee, setInscFee] = useState(2)
-  const [alcanceOp, setAlcanceOp] = useState<Alcance>('mundial')
-  const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([])
   const [savingRules, setSavingRules] = useState(false)
+  // Apuestas registradas — cuando hay > 0 las reglas se bloquean
+  const [totalApuestas, setTotalApuestas] = useState(0)
+  const [rulesUnlocked, setRulesUnlocked] = useState(false)
+  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false)
+
+  // Contacto del admin (visible para todos los jugadores)
+  const [contactoEmail, setContactoEmail] = useState('')
+  const [contactoTel, setContactoTel] = useState('')
+  const [savingContacto, setSavingContacto] = useState(false)
 
   // Filtros tab Partidos
   const [matchSearch, setMatchSearch] = useState('')
   const [matchView, setMatchView] = useState<'todos' | 'pendientes' | 'cerrados'>('todos')
 
-  // Filtros selección manual (Reglas)
-  const [selSearch, setSelSearch] = useState('')
-  const [selCategory, setSelCategory] = useState<SelCategory>('todos')
-
-  const [syncing, setSyncing] = useState(false)
   const [closing, setClosing] = useState(false)
   // Wallets de los potenciales ganadores (cargadas cuando moneda es cripto)
   const [winnerWallets, setWinnerWallets] = useState<Record<string, string | null>>({})
@@ -124,36 +107,15 @@ export default function PollAdmin() {
   const [cancelResult, setCancelResult] = useState<RefundResult[]>([])
   // Pagos cripto registrados (para tabla en Personas)
   const [payments, setPayments] = useState<PollPayment[]>([])
+  // Mensajes del grupo
+  const [mensajes, setMensajes] = useState<PollMensaje[]>([])
+  const [nuevoMensaje, setNuevoMensaje] = useState('')
+  const [enviandoMensaje, setEnviandoMensaje] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   const showToast = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 2400)
-  }
-
-  const syncScores = async () => {
-    setSyncing(true)
-    try {
-      const { data: { session: currentSession } } = await supabase.auth.getSession()
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-scores`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type':  'application/json',
-            Authorization:   `Bearer ${currentSession?.access_token}`,
-          },
-          body: '{}',
-        }
-      )
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Error al sincronizar')
-      showToast(`Sync OK · ${data.synced} partido(s) actualizado(s)`)
-      await loadAll()
-    } catch (err: unknown) {
-      showToast('Error sync: ' + (err instanceof Error ? err.message : 'desconocido'))
-    } finally {
-      setSyncing(false)
-    }
   }
 
   const loadTabla = useCallback(async () => {
@@ -177,7 +139,8 @@ export default function PollAdmin() {
 
   const loadAll = useCallback(async () => {
     if (!session || !pollId) return
-    setLoading(true)
+    const isFirst = !initialLoadDone.current
+    if (isFirst) setLoading(true)
 
     const userId = session.user.id
 
@@ -212,8 +175,8 @@ export default function PollAdmin() {
       const enVivo     = kickoff && !finalizado
       return {
         ...m,
-        resultado_local:     dbRow?.resultado_local     ?? null,
-        resultado_visitante: dbRow?.resultado_visitante ?? null,
+        resultado_local:     dbRow?.resultado_local     ?? m.resultado_local     ?? null,
+        resultado_visitante: dbRow?.resultado_visitante ?? m.resultado_visitante ?? null,
         cerrado:  finalizado || enVivo,
         en_vivo:  enVivo,
       }
@@ -232,10 +195,18 @@ export default function PollAdmin() {
         predMap[pr.partido_id] = { local: pr.pred_local, visitante: pr.pred_visitante }
         savedPredIds.add(pr.partido_id)
       })
-    setAdminPreds(predMap)
-    const initSave: Record<string, 'idle' | 'saving' | 'saved'> = {}
-    ms.forEach(m => { initSave[m.id] = savedPredIds.has(m.id) ? 'saved' : 'idle' })
-    setAdminSaveState(initSave)
+    if (isFirst) {
+      setAdminPreds(predMap)
+      const initSave: Record<string, 'idle' | 'saving' | 'saved'> = {}
+      ms.forEach(m => { initSave[m.id] = savedPredIds.has(m.id) ? 'saved' : 'idle' })
+      setAdminSaveState(initSave)
+    } else {
+      setAdminPreds(prev => {
+        const next = { ...predMap }
+        dirtyAdminMatchIds.current.forEach(id => { if (prev[id] !== undefined) next[id] = prev[id] })
+        return next
+      })
+    }
 
     if (p) {
       setExacto(p.reglas.exacto)
@@ -246,8 +217,26 @@ export default function PollAdmin() {
       setPrem1(premios[1] ?? 30)
       setPrem2(premios[2] ?? 20)
       setInscFee(p.inscripcion)
-      setAlcanceOp(p.reglas.alcance ?? 'mundial')
-      setSelectedMatchIds(p.reglas.partidos_seleccionados ?? [])
+    }
+
+    // Contar apuestas únicas (usuarios que ya apostaron en esta polla)
+    const { count } = await supabase
+      .from('predicciones')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('poll_id', pollId)
+    setTotalApuestas(count ?? 0)
+
+    // Cargar datos de contacto del admin (solo en primera carga)
+    if (isFirst && session) {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('contacto_email, contacto_telefono')
+        .eq('id', session.user.id)
+        .single()
+      if (profileData) {
+        setContactoEmail((profileData as any).contacto_email ?? '')
+        setContactoTel((profileData as any).contacto_telefono ?? '')
+      }
     }
 
     await loadTabla()
@@ -297,23 +286,27 @@ export default function PollAdmin() {
       }
     }
 
-    setLoading(false)
+    if (isFirst) {
+      initialLoadDone.current = true
+      setLoading(false)
+    }
   }, [session, pollId, loadTabla])
 
   useEffect(() => { loadAll() }, [loadAll])
 
   // Realtime: reacciona al instante cuando el cron escribe resultados
-  // Fallback: refresca cada 60s por si el canal WebSocket se interrumpe
+  // Fallback: 15s si hay partidos en vivo, 60s si no
   useEffect(() => {
     if (!pollId) return
     const channel = supabase
       .channel(`admin-rt-${pollId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'poll_resultados', filter: `poll_id=eq.${pollId}` }, () => { loadAll() })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'partidos' }, () => { loadAll() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'partidos' }, () => { loadAll() })
       .subscribe()
-    const fallback = setInterval(() => { loadAll() }, 60_000)
+    const interval = matches.some(m => m.en_vivo) ? 15_000 : 60_000
+    const fallback = setInterval(() => { loadAll() }, interval)
     return () => { supabase.removeChannel(channel); clearInterval(fallback) }
-  }, [pollId, loadAll])
+  }, [pollId, loadAll, matches])
 
   useEffect(() => {
     if (!loading && poll && poll.admin_id !== session?.user.id) {
@@ -321,7 +314,53 @@ export default function PollAdmin() {
     }
   }, [loading, poll, session, pollId, navigate])
 
+  // Mensajes: carga inicial + Realtime
+  const loadMensajes = useCallback(async () => {
+    if (!pollId) return
+    const { data } = await supabase
+      .from('poll_mensajes')
+      .select('*, profiles(nombre)')
+      .eq('poll_id', pollId)
+      .order('created_at', { ascending: true })
+    setMensajes((data || []) as PollMensaje[])
+  }, [pollId])
+
+  useEffect(() => { loadMensajes() }, [loadMensajes])
+
+  useEffect(() => {
+    if (!pollId) return
+    const ch = supabase
+      .channel(`admin-chat-${pollId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'poll_mensajes', filter: `poll_id=eq.${pollId}` },
+        () => { loadMensajes() })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'poll_mensajes', filter: `poll_id=eq.${pollId}` },
+        () => { loadMensajes() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [pollId, loadMensajes])
+
+  useEffect(() => {
+    if (activeTab === 'people') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [mensajes, activeTab])
+
+  const enviarMensaje = async () => {
+    if (!session || !pollId || !nuevoMensaje.trim()) return
+    setEnviandoMensaje(true)
+    await supabase.from('poll_mensajes').insert({
+      poll_id: pollId,
+      user_id: session.user.id,
+      mensaje: nuevoMensaje.trim(),
+    })
+    setNuevoMensaje('')
+    setEnviandoMensaje(false)
+  }
+
+  const borrarMensaje = async (id: string) => {
+    await supabase.from('poll_mensajes').delete().eq('id', id)
+  }
+
   const updateAdminPred = (matchId: string, side: 'local' | 'visitante', delta: number) => {
+    dirtyAdminMatchIds.current.add(matchId)
     setAdminPreds(prev => {
       const cur = prev[matchId] || { local: 0, visitante: 0 }
       return { ...prev, [matchId]: { ...cur, [side]: Math.max(0, cur[side] + delta) } }
@@ -344,6 +383,7 @@ export default function PollAdmin() {
       setAdminSaveState(prev => ({ ...prev, [matchId]: 'idle' }))
       showToast('Error al guardar apuesta: ' + error.message)
     } else {
+      dirtyAdminMatchIds.current.delete(matchId)
       setAdminSaveState(prev => ({ ...prev, [matchId]: 'saved' }))
       showToast('Apuesta confirmada ✓')
     }
@@ -365,11 +405,7 @@ export default function PollAdmin() {
     if (!pollId) return
     setSavingRules(true)
     const { error } = await supabase.from('pollas').update({
-      reglas: {
-        exacto, resultado, fallo,
-        alcance: alcanceOp,
-        partidos_seleccionados: alcanceOp === 'seleccion' ? selectedMatchIds : [],
-      },
+      reglas: { exacto, resultado, fallo },
       premios: [prem0, prem1, prem2],
       inscripcion: inscFee,
     }).eq('id', pollId)
@@ -379,10 +415,19 @@ export default function PollAdmin() {
     await loadAll()
   }
 
-  const toggleMatchSelection = (matchId: string) => {
-    setSelectedMatchIds(prev =>
-      prev.includes(matchId) ? prev.filter(id => id !== matchId) : [...prev, matchId]
-    )
+  const saveContacto = async () => {
+    if (!session) return
+    setSavingContacto(true)
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        contacto_email: contactoEmail.trim() || null,
+        contacto_telefono: contactoTel.trim() || null,
+      })
+      .eq('id', session.user.id)
+    setSavingContacto(false)
+    if (error) { showToast('Error: ' + error.message); return }
+    showToast('Contacto guardado ✓')
   }
 
   const cerrarPolla = async () => {
@@ -390,36 +435,27 @@ export default function PollAdmin() {
     if (!confirm('¿Cerrar la polla y repartir el bote? Esta acción no se puede deshacer fácilmente.')) return
     setClosing(true)
 
-    // Pollas cripto: llamar Edge Function (cierra + distribuye USDC)
-    if (isCryptoMoneda(poll.moneda)) {
-      try {
-        const { data: { session: currentSession } } = await supabase.auth.getSession()
-        const res = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cerrar-polla`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${currentSession?.access_token}`,
-            },
-            body: JSON.stringify({ poll_id: pollId }),
-          }
-        )
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error ?? 'Error al cerrar')
-        if (data.distribution) setDistResult(data.distribution)
-        showToast('¡Polla cerrada! USDC distribuido a ganadores.')
-      } catch (err: unknown) {
-        showToast('Error: ' + (err instanceof Error ? err.message : 'Error desconocido'))
-      } finally {
-        setClosing(false)
-      }
-    } else {
-      // Pollas fiat: flujo original
-      const { error } = await supabase.rpc('fn_cerrar_polla', { p_poll_id: pollId })
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession()
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cerrar-polla`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentSession?.access_token}`,
+          },
+          body: JSON.stringify({ poll_id: pollId }),
+        }
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Error al cerrar')
+      if (data.distribution) setDistResult(data.distribution)
+      showToast(isCryptoMoneda(poll.moneda) ? '¡Polla cerrada! Cripto distribuida a ganadores.' : '¡Polla cerrada! Ganadores registrados.')
+    } catch (err: unknown) {
+      showToast('Error: ' + (err instanceof Error ? err.message : 'Error desconocido'))
+    } finally {
       setClosing(false)
-      if (error) { showToast('Error al cerrar: ' + error.message); return }
-      showToast('¡Polla cerrada! Ganadores registrados.')
     }
 
     await loadAll()
@@ -522,15 +558,6 @@ export default function PollAdmin() {
               <button className="back-btn" onClick={() => navigate('/pollas')}>← Salir</button>
             </div>
             <div style={{ display:'flex', gap:6 }}>
-              <button
-                className="back-btn"
-                style={{ color:'var(--lime)', borderColor:'rgba(200,255,60,.3)' }}
-                onClick={syncScores}
-                disabled={syncing}
-                title="Sincronizar scores desde football-data.org"
-              >
-                {syncing ? '⏳' : '⚡ Sync'}
-              </button>
               <button className="back-btn" style={{ color:'var(--lime)', borderColor:'rgba(200,255,60,.3)' }}
                 onClick={() => navigate(`/pollas/${pollId}`)}>
                 Vista jugador
@@ -644,7 +671,7 @@ export default function PollAdmin() {
                               animation:'pulse-live 1.4s ease-in-out infinite' }}>⚽ EN VIVO</span>
                           : m.cerrado
                             ? <span className="lockchip">✓ Final</span>
-                            : m.destacado ? <span className="star">⭐ Colombia</span> : null}
+                            : null}
                       </div>
 
                       {/* Sección de apuesta propia (todos apuestan, incluyendo el admin) */}
@@ -728,220 +755,95 @@ export default function PollAdmin() {
                   )
                 })}
                 <div className="lockmsg" style={{ marginTop:8 }}>
-                  Las apuestas se bloquean automáticamente cuando arranca el partido. Registra el resultado oficial después del pitazo final.
+                  Las apuestas se bloquean automáticamente cuando arranca el partido. El resultado se sincroniza solo al terminar.
                 </div>
               </div>
             )
           })()}
 
           {/* ---- TAB: Reglas ---- */}
-          {activeTab === 'rules' && (
+          {activeTab === 'rules' && (() => {
+            const locked = totalApuestas > 0 && !rulesUnlocked
+            const inpStyle = locked ? { opacity:.5, pointerEvents:'none' as const } : {}
+            return (
             <div>
-              {/* Alcance de la polla */}
-              <div className="acard">
-                <div className="h">Alcance de la polla</div>
-                <div className="d" style={{ marginBottom:10 }}>
-                  Define sobre qué partidos del Mundial aplica esta polla. Se puede cambiar mientras esté abierta.
+              {/* Banner de bloqueo */}
+              {totalApuestas > 0 && (
+                <div style={{ padding:'10px 12px', borderRadius:10, marginBottom:10,
+                  background: rulesUnlocked ? 'rgba(255,138,61,.08)' : 'rgba(200,255,60,.06)',
+                  border: `1px solid ${rulesUnlocked ? 'rgba(255,138,61,.3)' : 'rgba(200,255,60,.2)'}` }}>
+                  {rulesUnlocked ? (
+                    <div style={{ fontSize:11, color:'var(--orange)', fontWeight:700 }}>
+                      ⚠ Modo edición activo — hay {totalApuestas} apuesta(s) registrada(s).
+                      Guardar cambiará los puntos de todos los participantes.
+                    </div>
+                  ) : (
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
+                      <div style={{ fontSize:11, color:'var(--lime)' }}>
+                        🔒 Reglas bloqueadas · {totalApuestas} apuesta(s) en curso
+                      </div>
+                      <button
+                        onClick={() => setShowUnlockConfirm(true)}
+                        style={{ fontSize:10, padding:'4px 12px', borderRadius:8, border:'1px solid rgba(255,138,61,.4)',
+                          background:'rgba(255,138,61,.08)', color:'var(--orange)', cursor:'pointer',
+                          fontWeight:700, flexShrink:0 }}
+                      >
+                        Modificar
+                      </button>
+                    </div>
+                  )}
                 </div>
-                {ALCANCE_OPTS.map(o => (
-                  <div key={o.id} className={`scope-opt ${alcanceOp === o.id ? 'on' : ''}`}
-                    onClick={() => setAlcanceOp(o.id)}>
-                    <div className="sico">{o.ico}</div>
-                    <div className="sinfo">
-                      <div className="stitle">{o.title}</div>
-                      <div className="sdesc">{o.desc}</div>
-                    </div>
-                    <div className="scheck" />
-                  </div>
-                ))}
+              )}
 
-                {/* Selección manual de partidos */}
-                {alcanceOp === 'seleccion' && (() => {
-                  const colombiaMatches = matches.filter(m => m.destacado)
-                  const favMatches = matches.filter(m => !m.destacado && isFavorito(m))
-                  const grupoMatches = matches.filter(m => isGrupo(m.fase) && !isFavorito(m))
-                  const elimMatches = matches.filter(m => !isGrupo(m.fase) && !isFavorito(m))
-
-                  const catCounts: Record<SelCategory, number> = {
-                    todos: matches.length,
-                    colombia: colombiaMatches.length,
-                    favoritos: colombiaMatches.length + favMatches.length,
-                    grupos: grupoMatches.length,
-                    elim: elimMatches.length,
-                  }
-
-                  const sq = selSearch.trim().toLowerCase()
-                  const filterBySearch = (ms: Partido[]) =>
-                    sq ? ms.filter(m =>
-                      m.equipo_local.toLowerCase().includes(sq) ||
-                      m.equipo_visitante.toLowerCase().includes(sq)
-                    ) : ms
-
-                  let sections: { label: string; ms: Partido[] }[] = []
-                  if (selCategory === 'todos') {
-                    const col = filterBySearch(colombiaMatches)
-                    const fav = filterBySearch(favMatches)
-                    const grp = filterBySearch(grupoMatches)
-                    const eli = filterBySearch(elimMatches)
-                    if (col.length) sections.push({ label:'⭐ Colombia', ms: col })
-                    if (fav.length) sections.push({ label:'🔥 Favoritos', ms: fav })
-                    if (grp.length) sections.push({ label:'🏟️ Fase de Grupos', ms: grp })
-                    if (eli.length) sections.push({ label:'⚡ Eliminatorias', ms: eli })
-                  } else if (selCategory === 'colombia') {
-                    sections = [{ label:'⭐ Colombia', ms: filterBySearch(colombiaMatches) }]
-                  } else if (selCategory === 'favoritos') {
-                    const col = filterBySearch(colombiaMatches)
-                    const fav = filterBySearch(favMatches)
-                    if (col.length) sections.push({ label:'⭐ Colombia', ms: col })
-                    if (fav.length) sections.push({ label:'🔥 Otros favoritos', ms: fav })
-                  } else if (selCategory === 'grupos') {
-                    sections = [{ label:'🏟️ Fase de Grupos', ms: filterBySearch(matches.filter(m => isGrupo(m.fase))) }]
-                  } else {
-                    sections = [{ label:'⚡ Eliminatorias', ms: filterBySearch(matches.filter(m => !isGrupo(m.fase))) }]
-                  }
-
-                  const visibleIds = sections.flatMap(s => s.ms.map(m => m.id))
-                  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedMatchIds.includes(id))
-
-                  const selectAllVisible = () => {
-                    setSelectedMatchIds(prev => [...new Set([...prev, ...visibleIds])])
-                  }
-                  const deselectAllVisible = () => {
-                    setSelectedMatchIds(prev => prev.filter(id => !visibleIds.includes(id)))
-                  }
-
-                  return (
-                    <div style={{ marginTop:12 }}>
-                      {/* Header + contador */}
-                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                        <div style={{ fontSize:10, color:'var(--gold)', fontWeight:700, textTransform:'uppercase', letterSpacing:1 }}>
-                          {selectedMatchIds.length} seleccionados
-                        </div>
-                        <div style={{ display:'flex', gap:6 }}>
-                          <button
-                            onClick={allVisibleSelected ? deselectAllVisible : selectAllVisible}
-                            style={{ fontSize:9, padding:'3px 8px', borderRadius:6, border:'1px solid var(--line)',
-                              background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer' }}
-                          >
-                            {allVisibleSelected ? 'Quitar todos' : 'Marcar todos'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Búsqueda */}
-                      <input
-                        className="inp"
-                        placeholder="Buscar equipo…"
-                        value={selSearch}
-                        onChange={e => setSelSearch(e.target.value)}
-                        style={{ width:'100%', marginBottom:8, boxSizing:'border-box' }}
-                      />
-
-                      {/* Chips de categoría */}
-                      <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:10 }}>
-                        {([
-                          { v:'todos',     label:'Todos' },
-                          { v:'colombia',  label:'⭐ Colombia' },
-                          { v:'favoritos', label:'🔥 Favoritos' },
-                          { v:'grupos',    label:'🏟️ Grupos' },
-                          { v:'elim',      label:'⚡ Elim.' },
-                        ] as { v: SelCategory; label: string }[]).map(({ v, label }) => (
-                          <button
-                            key={v}
-                            onClick={() => setSelCategory(v)}
-                            style={{
-                              padding:'4px 10px', borderRadius:20, border:'1px solid', fontSize:10,
-                              fontWeight:700, cursor:'pointer',
-                              borderColor: selCategory === v ? 'var(--gold)' : 'var(--line)',
-                              background: selCategory === v ? 'rgba(255,194,75,.1)' : 'var(--panel-2)',
-                              color: selCategory === v ? 'var(--gold)' : 'var(--muted)',
-                            }}
-                          >
-                            {label}
-                            <span style={{ marginLeft:4, opacity:.7 }}>({catCounts[v]})</span>
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Secciones de partidos */}
-                      {sections.length === 0 && (
-                        <div style={{ fontSize:11, color:'var(--muted)', textAlign:'center', padding:12 }}>
-                          Sin partidos para este filtro.
-                        </div>
-                      )}
-                      {sections.map(({ label, ms }) => (
-                        <div key={label} style={{ marginBottom:10 }}>
-                          <div style={{ fontSize:9, color:'var(--muted)', fontWeight:700, textTransform:'uppercase',
-                            letterSpacing:1, marginBottom:4 }}>{label}</div>
-                          {ms.map(m => (
-                            <label key={m.id} style={{ display:'flex', alignItems:'center', gap:8,
-                              padding:'7px 8px', borderRadius:8, cursor:'pointer',
-                              background: selectedMatchIds.includes(m.id) ? 'rgba(255,194,75,.07)' : 'transparent',
-                              border: selectedMatchIds.includes(m.id) ? '1px solid rgba(255,194,75,.2)' : '1px solid transparent',
-                              marginBottom:3 }}>
-                              <input type="checkbox" checked={selectedMatchIds.includes(m.id)}
-                                onChange={() => toggleMatchSelection(m.id)}
-                                style={{ accentColor:'var(--gold)', width:14, height:14, flexShrink:0 }} />
-                              <span style={{ fontSize:12 }}>{m.flag_local}</span>
-                              <span style={{ fontSize:11, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                                {m.equipo_local} <span style={{ color:'var(--muted)' }}>vs</span> {m.equipo_visitante}
-                              </span>
-                              <span style={{ fontSize:12 }}>{m.flag_visitante}</span>
-                              <span style={{ fontSize:9, color:'var(--muted)', flexShrink:0 }}>{m.fecha}</span>
-                            </label>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}
-              </div>
-
-              <div className="acard">
+              <div className="acard" style={inpStyle}>
                 <div className="h">Puntuación</div>
                 <div className="d">Cuántos puntos vale cada acierto. Visible para todos los miembros.</div>
                 <div className="rulegrid" style={{ marginTop:12 }}>
                   <div className="field">
                     <label>Exacto</label>
                     <input className="inp" type="number" min="0" value={exacto}
-                      onChange={e => setExacto(+e.target.value)} />
+                      disabled={locked} onChange={e => setExacto(+e.target.value)} />
                   </div>
                   <div className="field">
                     <label>Resultado</label>
                     <input className="inp" type="number" min="0" value={resultado}
-                      onChange={e => setResultado(+e.target.value)} />
+                      disabled={locked} onChange={e => setResultado(+e.target.value)} />
                   </div>
                   <div className="field">
                     <label>Fallo</label>
                     <input className="inp" type="number" min="0" value={fallo}
-                      onChange={e => setFallo(+e.target.value)} />
+                      disabled={locked} onChange={e => setFallo(+e.target.value)} />
                   </div>
                 </div>
               </div>
 
-              <div className="acard">
+              <div className="acard" style={inpStyle}>
                 <div className="h">Inscripción y premios</div>
                 <div className="d">Pon 0% en 2° o 3° si quieres un único ganador.</div>
                 <div className="field" style={{ marginTop:12 }}>
-                  <label>Inscripción ({poll.moneda})</label>
+                  <label>
+                    Inscripción ({poll.moneda})
+                    {pagados.length > 0 && <span style={{ marginLeft:6, fontSize:9, color:'var(--muted)' }}>· bloqueada ({pagados.length} pagaron)</span>}
+                  </label>
                   <input className="inp" type="number" min="0" step="0.5" value={inscFee}
+                    disabled={locked || pagados.length > 0}
                     onChange={e => setInscFee(+e.target.value)} />
                 </div>
                 <div className="rulegrid">
                   <div className="field">
                     <label>1° %</label>
                     <input className="inp" type="number" min="0" max="100" value={prem0}
-                      onChange={e => setPrem0(+e.target.value)} />
+                      disabled={locked} onChange={e => setPrem0(+e.target.value)} />
                   </div>
                   <div className="field">
                     <label>2° %</label>
                     <input className="inp" type="number" min="0" max="100" value={prem1}
-                      onChange={e => setPrem1(+e.target.value)} />
+                      disabled={locked} onChange={e => setPrem1(+e.target.value)} />
                   </div>
                   <div className="field">
                     <label>3° %</label>
                     <input className="inp" type="number" min="0" max="100" value={prem2}
-                      onChange={e => setPrem2(+e.target.value)} />
+                      disabled={locked} onChange={e => setPrem2(+e.target.value)} />
                   </div>
                 </div>
                 {sumaP !== 100 && (
@@ -949,14 +851,48 @@ export default function PollAdmin() {
                 )}
               </div>
 
-              <div className="admin-box" style={{ marginBottom:12 }}>
-                <div className="admin-box-label">🛡️ Acción de admin</div>
-                <button className="save gold" onClick={saveRules} disabled={savingRules || sumaP !== 100} style={{ margin:0 }}>
-                  {savingRules ? 'Guardando...' : 'Guardar reglas'}
+              <div className="acard">
+                <div className="h">Tu contacto (visible para los jugadores)</div>
+                <div className="d" style={{ marginBottom:10 }}>
+                  Los jugadores verán esta info en la página de la polla para contactarte directamente.
+                </div>
+                <div className="field">
+                  <label>Correo electrónico</label>
+                  <input className="inp" type="email" value={contactoEmail}
+                    onChange={e => setContactoEmail(e.target.value)}
+                    placeholder="tu@correo.com" />
+                </div>
+                <div className="field">
+                  <label>WhatsApp / Teléfono</label>
+                  <input className="inp" type="tel" value={contactoTel}
+                    onChange={e => setContactoTel(e.target.value)}
+                    placeholder="+57 300 000 0000" />
+                </div>
+                <button className="save" onClick={saveContacto} disabled={savingContacto} style={{ margin:'8px 0 0' }}>
+                  {savingContacto ? 'Guardando...' : 'Guardar contacto'}
                 </button>
               </div>
+
+              {!locked && (
+                <div className="admin-box" style={{ marginBottom:12 }}>
+                  <div className="admin-box-label">🛡️ Acción de admin</div>
+                  <button className="save gold" onClick={async () => { await saveRules(); setRulesUnlocked(false) }}
+                    disabled={savingRules || sumaP !== 100} style={{ margin:0 }}>
+                    {savingRules ? 'Guardando...' : 'Guardar reglas'}
+                  </button>
+                  {rulesUnlocked && (
+                    <button onClick={() => setRulesUnlocked(false)}
+                      style={{ marginTop:6, fontSize:11, padding:'6px 14px', borderRadius:8,
+                        border:'1px solid var(--line)', background:'var(--panel-2)',
+                        color:'var(--muted)', cursor:'pointer', display:'block', width:'100%' }}>
+                      Cancelar edición
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-          )}
+            )
+          })()}
 
           {/* ---- TAB: Gente ---- */}
           {activeTab === 'people' && (
@@ -1103,6 +1039,69 @@ export default function PollAdmin() {
                   </div>
                 </div>
               )}
+
+              {/* Mensajes del grupo */}
+              <div className="acard" style={{ marginTop:10 }}>
+                <div className="h">
+                  Mensajes del grupo
+                  {mensajes.length > 0 && <span className="badge open" style={{ marginLeft:6 }}>{mensajes.length}</span>}
+                </div>
+                <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:6 }}>
+                  {mensajes.length === 0 ? (
+                    <div className="d" style={{ textAlign:'center' }}>Sin mensajes todavía.</div>
+                  ) : (
+                    mensajes.map(m => {
+                      const esAdmin = poll.admin_id === m.user_id
+                      return (
+                        <div key={m.id} style={{
+                          padding:'8px 10px', borderRadius:8,
+                          background: esAdmin ? 'rgba(200,255,60,.07)' : 'var(--bg)',
+                          border: esAdmin ? '1px solid rgba(200,255,60,.2)' : '1px solid var(--line)',
+                        }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
+                            <span style={{ fontSize:11, fontWeight:700, color: esAdmin ? 'var(--lime)' : 'var(--txt)' }}>
+                              {m.profiles?.nombre ?? '—'}
+                            </span>
+                            {esAdmin && <span style={{ fontSize:8, background:'rgba(200,255,60,.15)', color:'var(--lime)',
+                              borderRadius:6, padding:'1px 5px', fontWeight:900 }}>TÚ (ADMIN)</span>}
+                            <span style={{ fontSize:9, color:'var(--muted)', marginLeft:'auto' }}>
+                              {new Date(m.created_at).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' })}
+                            </span>
+                            <button onClick={() => borrarMensaje(m.id)}
+                              style={{ fontSize:9, color:'var(--muted)', background:'none', border:'none',
+                                cursor:'pointer', padding:'0 2px' }}>
+                              ✕
+                            </button>
+                          </div>
+                          <div style={{ fontSize:12, color:'var(--txt)', lineHeight:1.5, wordBreak:'break-word' }}>
+                            {m.mensaje}
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+                <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                  <input
+                    className="inp"
+                    style={{ flex:1, margin:0 }}
+                    placeholder="Responde al grupo…"
+                    value={nuevoMensaje}
+                    maxLength={500}
+                    onChange={e => setNuevoMensaje(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarMensaje() } }}
+                  />
+                  <button
+                    className="save gold"
+                    style={{ margin:0, padding:'0 14px', flexShrink:0 }}
+                    onClick={enviarMensaje}
+                    disabled={enviandoMensaje || !nuevoMensaje.trim()}
+                  >
+                    Enviar
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1166,64 +1165,6 @@ export default function PollAdmin() {
                     </div>
                   )}
 
-                  <div className="admin-box" style={{ marginBottom:8 }}>
-                    <div className="admin-box-label">🛡️ Acción de admin · irreversible</div>
-                    <button className="save gold" onClick={cerrarPolla} disabled={closing || cancelling || pagados.length === 0} style={{ margin:0 }}>
-                      {closing
-                        ? 'Cerrando...'
-                        : isCryptoMoneda(poll.moneda)
-                          ? `Cerrar y distribuir ${monedaToToken(poll.moneda)} en Celo`
-                          : 'Cerrar polla y repartir el bote'}
-                    </button>
-                    <div className="lockmsg" style={{ marginTop:6 }}>
-                      Cerrar bloquea todas las apuestas y confirma a los ganadores definitivamente.
-                    </div>
-                  </div>
-
-                  {/* Cancelación */}
-                  <div className="admin-box" style={{ marginBottom:8, borderColor:'var(--lose)' }}>
-                    <div className="admin-box-label" style={{ color:'var(--lose)' }}>⚠️ Zona de peligro · cancelar polla</div>
-                    {!confirmCancel ? (
-                      <>
-                        <button
-                          className="save ghost"
-                          onClick={() => setConfirmCancel(true)}
-                          disabled={closing || cancelling}
-                          style={{ margin:0, borderColor:'var(--lose)', color:'var(--lose)' }}
-                        >
-                          Cancelar polla
-                        </button>
-                        <div className="lockmsg" style={{ marginTop:6 }}>
-                          {isCryptoMoneda(poll.moneda)
-                            ? `Cancela la polla y reembolsa ${fmt(pagados.length * poll.inscripcion)} ${monedaToToken(poll.moneda)} a ${pagados.length} participante(s).`
-                            : 'Cancela la polla definitivamente. Los pagos fiat deben gestionarse manualmente.'}
-                        </div>
-                      </>
-                    ) : (
-                      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                        <div style={{ fontSize:12, color:'var(--lose)', fontWeight:700 }}>
-                          ¿Confirmar cancelación?{isCryptoMoneda(poll.moneda) ? ` Se devolverá ${monedaToToken(poll.moneda)} a cada participante.` : ''}
-                        </div>
-                        <div style={{ display:'flex', gap:8 }}>
-                          <button
-                            className="save ghost"
-                            onClick={() => setConfirmCancel(false)}
-                            style={{ margin:0, flex:1 }}
-                          >
-                            No, volver
-                          </button>
-                          <button
-                            className="save"
-                            onClick={cancelarPolla}
-                            disabled={cancelling}
-                            style={{ margin:0, flex:1, background:'var(--lose)', borderColor:'var(--lose)' }}
-                          >
-                            {cancelling ? 'Cancelando...' : 'Sí, cancelar'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </>
               ) : poll.estado === 'cancelada' ? (
                 <>
@@ -1354,6 +1295,43 @@ export default function PollAdmin() {
 
         <Toast msg={toast} />
       </div>
+
+      {/* Modal de confirmación para desbloquear reglas */}
+      {showUnlockConfirm && (
+        <div className="overlay">
+          <div className="modal">
+            <div className="modal-head">
+              <div className="modal-title">⚠ Modificar reglas</div>
+              <button className="modal-close" onClick={() => setShowUnlockConfirm(false)}>×</button>
+            </div>
+            <div style={{ fontSize:13, color:'var(--txt)', lineHeight:1.6, marginBottom:16 }}>
+              Hay <b style={{ color:'var(--gold)' }}>{totalApuestas} apuesta(s)</b> registrada(s) en esta polla.
+              <br /><br />
+              Cambiar los puntos o premios afectará la tabla de posiciones de todos los participantes.
+              <b style={{ color:'var(--orange)' }}> Esta acción no se puede deshacer.</b>
+            </div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginBottom:16 }}>
+              Si los jugadores ya acordaron las reglas, considera hacer una votación antes de cambiarlas.
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button
+                className="save gold"
+                style={{ flex:1, margin:0 }}
+                onClick={() => { setRulesUnlocked(true); setShowUnlockConfirm(false); setActiveTab('rules') }}
+              >
+                Entiendo, modificar igual
+              </button>
+              <button
+                onClick={() => setShowUnlockConfirm(false)}
+                style={{ flex:1, padding:'10px', borderRadius:10, border:'1px solid var(--line)',
+                  background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer', fontSize:13 }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

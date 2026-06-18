@@ -2,10 +2,10 @@ export interface Profile {
   id: string
   nombre: string
   avatar_url: string | null
+  contacto_email: string | null
+  contacto_telefono: string | null
   created_at: string
 }
-
-export type Alcance = 'mundial' | 'grupos' | 'eliminatorias' | 'seleccion'
 
 export interface Polla {
   id: string
@@ -19,8 +19,6 @@ export interface Polla {
     exacto: number
     resultado: number
     fallo: number
-    alcance?: Alcance
-    partidos_seleccionados?: string[]
   }
   premios: number[]
   created_at: string
@@ -91,6 +89,15 @@ export interface Ganador {
 
 export interface GanadorWithProfile extends Ganador {
   profiles: { nombre: string } | null
+}
+
+export interface PollMensaje {
+  id: string
+  poll_id: string
+  user_id: string
+  mensaje: string
+  created_at: string
+  profiles?: { nombre: string } | null
 }
 
 export interface PollPayment {
