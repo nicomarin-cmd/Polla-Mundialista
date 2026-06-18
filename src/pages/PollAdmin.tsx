@@ -59,7 +59,6 @@ export default function PollAdmin() {
   const navigate = useNavigate()
 
   const initialLoadDone = useRef(false)
-  const dirtyAdminMatchIds = useRef<Set<string>>(new Set())
 
   const [poll, setPoll] = useState<Polla | null>(null)
   const [matches, setMatches] = useState<Partido[]>([])
@@ -68,11 +67,6 @@ export default function PollAdmin() {
   const [activeTab, setActiveTab] = useState<'matches' | 'rules' | 'people' | 'close'>('matches')
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
-
-  // Apuestas propias del admin (igual que PollPlayer)
-  const [adminPreds, setAdminPreds] = useState<Record<string, { local: number; visitante: number }>>({})
-  const [adminSaveState, setAdminSaveState] = useState<Record<string, 'idle' | 'saving' | 'saved'>>({})
-  const [myMember, setMyMember] = useState<{ pagado: boolean } | null>(null)
 
   const [exacto, setExacto] = useState(5)
   const [resultado, setResultado] = useState(3)
@@ -149,15 +143,11 @@ export default function PollAdmin() {
       { data: matchesData },
       { data: membersData },
       { data: resultadosData },
-      { data: myMemberData },
-      { data: adminPredsData },
     ] = await Promise.all([
       supabase.from('pollas').select('*').eq('id', pollId).single(),
       supabase.from('partidos').select('*').order('fecha_inicio', { ascending: true, nullsFirst: false }).order('orden'),
       supabase.from('poll_members').select('*, profiles(nombre)').eq('poll_id', pollId).order('joined_at'),
       supabase.from('poll_resultados').select('*').eq('poll_id', pollId),
-      supabase.from('poll_members').select('pagado').eq('poll_id', pollId).eq('user_id', userId).single(),
-      supabase.from('predicciones').select('*').eq('poll_id', pollId).eq('user_id', userId),
     ])
 
     const p = pollData as Polla | null
@@ -185,28 +175,6 @@ export default function PollAdmin() {
     setPoll(p)
     setMatches(ms)
     setMembers((membersData || []) as PollMemberWithProfile[])
-    setMyMember(myMemberData as { pagado: boolean } | null)
-
-    // Cargar apuestas propias del admin
-    const predMap: Record<string, { local: number; visitante: number }> = {}
-    const savedPredIds = new Set<string>()
-    ;((adminPredsData || []) as { partido_id: string; pred_local: number; pred_visitante: number }[])
-      .forEach(pr => {
-        predMap[pr.partido_id] = { local: pr.pred_local, visitante: pr.pred_visitante }
-        savedPredIds.add(pr.partido_id)
-      })
-    if (isFirst) {
-      setAdminPreds(predMap)
-      const initSave: Record<string, 'idle' | 'saving' | 'saved'> = {}
-      ms.forEach(m => { initSave[m.id] = savedPredIds.has(m.id) ? 'saved' : 'idle' })
-      setAdminSaveState(initSave)
-    } else {
-      setAdminPreds(prev => {
-        const next = { ...predMap }
-        dirtyAdminMatchIds.current.forEach(id => { if (prev[id] !== undefined) next[id] = prev[id] })
-        return next
-      })
-    }
 
     if (p) {
       setExacto(p.reglas.exacto)
@@ -357,36 +325,6 @@ export default function PollAdmin() {
 
   const borrarMensaje = async (id: string) => {
     await supabase.from('poll_mensajes').delete().eq('id', id)
-  }
-
-  const updateAdminPred = (matchId: string, side: 'local' | 'visitante', delta: number) => {
-    dirtyAdminMatchIds.current.add(matchId)
-    setAdminPreds(prev => {
-      const cur = prev[matchId] || { local: 0, visitante: 0 }
-      return { ...prev, [matchId]: { ...cur, [side]: Math.max(0, cur[side] + delta) } }
-    })
-    setAdminSaveState(prev => ({ ...prev, [matchId]: 'idle' }))
-  }
-
-  const saveAdminPred = async (matchId: string) => {
-    if (!session || !pollId) return
-    setAdminSaveState(prev => ({ ...prev, [matchId]: 'saving' }))
-    const pred = adminPreds[matchId] || { local: 0, visitante: 0 }
-    const { error } = await supabase.from('predicciones').upsert({
-      poll_id: pollId,
-      user_id: session.user.id,
-      partido_id: matchId,
-      pred_local: pred.local,
-      pred_visitante: pred.visitante,
-    }, { onConflict: 'poll_id,user_id,partido_id' })
-    if (error) {
-      setAdminSaveState(prev => ({ ...prev, [matchId]: 'idle' }))
-      showToast('Error al guardar apuesta: ' + error.message)
-    } else {
-      dirtyAdminMatchIds.current.delete(matchId)
-      setAdminSaveState(prev => ({ ...prev, [matchId]: 'saved' }))
-      showToast('Apuesta confirmada ✓')
-    }
   }
 
   const togglePagado = async (member: PollMemberWithProfile) => {
@@ -649,111 +587,56 @@ export default function PollAdmin() {
                   </div>
                 )}
 
-                {visibleMatches.map(m => {
-                  const pred = adminPreds[m.id]
-                  const ms = adminSaveState[m.id] || 'idle'
-                  const predLabel = pred
-                    ? pred.local > pred.visitante ? `${m.equipo_local} gana`
-                      : pred.visitante > pred.local ? `${m.equipo_visitante} gana`
-                      : 'Empate'
-                    : 'Sin apuesta aún'
-                  return (
-                    <div key={m.id} className={`match ${m.cerrado ? 'locked' : ''}`} style={{
-                      borderColor: m.en_vivo ? 'rgba(255,90,95,.4)' : undefined,
-                      background: m.en_vivo ? 'rgba(255,90,95,.04)' : undefined,
-                    }}>
-                      <div className="when">
-                        <span>{m.fecha}{m.fecha_inicio ? ` · ${horaCO(m.fecha_inicio)}` : ''} · {m.fase}</span>
-                        {m.en_vivo
-                          ? <span style={{ fontSize:9, fontWeight:700, color:'#fff',
-                              background:'#ff2e2e', borderRadius:5,
-                              padding:'2px 6px', letterSpacing:.5,
-                              animation:'pulse-live 1.4s ease-in-out infinite' }}>⚽ EN VIVO</span>
-                          : m.cerrado
-                            ? <span className="lockchip">✓ Final</span>
-                            : null}
-                      </div>
-
-                      {/* Sección de apuesta propia (todos apuestan, incluyendo el admin) */}
-                      {!m.cerrado ? (
-                        <>
-                          <div style={{ fontSize:9, color:'var(--lime)', fontWeight:700, textTransform:'uppercase', letterSpacing:1, marginBottom:6 }}>
-                            Tu apuesta
-                          </div>
-                          <div className="teams">
-                            <div className="team">
-                              <div className="fl">{m.flag_local}</div>
-                              <div className="tn">{m.equipo_local}</div>
-                            </div>
-                            <div className="step">
-                              <button onClick={() => updateAdminPred(m.id, 'local', -1)} disabled={(pred?.local ?? 0) === 0}>−</button>
-                              <div className="sv">{pred?.local ?? 0}</div>
-                              <button onClick={() => updateAdminPred(m.id, 'local', 1)}>+</button>
-                            </div>
-                            <div className="midv">:</div>
-                            <div className="step">
-                              <button onClick={() => updateAdminPred(m.id, 'visitante', -1)} disabled={(pred?.visitante ?? 0) === 0}>−</button>
-                              <div className="sv">{pred?.visitante ?? 0}</div>
-                              <button onClick={() => updateAdminPred(m.id, 'visitante', 1)}>+</button>
-                            </div>
-                            <div className="team">
-                              <div className="fl">{m.flag_visitante}</div>
-                              <div className="tn">{m.equipo_visitante}</div>
-                            </div>
-                          </div>
-                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:8, marginBottom:10 }}>
-                            <div className={`pred ${pred ? '' : 'muted'}`} style={{ margin:0, fontSize:11 }}>
-                              {predLabel}
-                            </div>
-                            <button
-                              className={`match-save-mini ${ms}`}
-                              onClick={() => saveAdminPred(m.id)}
-                              disabled={ms === 'saving'}
-                            >
-                              {ms === 'saving' ? '…' : ms === 'saved' ? '✓ Confirmada' : 'Confirmar apuesta'}
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          {m.en_vivo && (
-                            <div style={{ fontSize:9, color:'rgba(255,90,95,.9)', fontWeight:700,
-                              textTransform:'uppercase', letterSpacing:1, marginBottom:6 }}>
-                              {m.resultado_local !== null ? 'Marcador actual' : 'Partido en curso'}
-                            </div>
-                          )}
-                          {/* Equipos + marcador */}
-                          <div className="teams" style={{ marginBottom:6 }}>
-                            <div className="team">
-                              <div className="fl">{m.flag_local}</div>
-                              <div className="tn">{m.equipo_local}</div>
-                            </div>
-                            <div style={{ minWidth:60, textAlign:'center',
-                              fontFamily:"'Anton',sans-serif",
-                              fontSize: m.en_vivo ? 26 : 22,
-                              color: m.en_vivo ? '#ff2e2e' : 'var(--txt)',
-                              letterSpacing:1 }}>
-                              {m.resultado_local !== null ? `${m.resultado_local}–${m.resultado_visitante}` : '–'}
-                            </div>
-                            <div className="team">
-                              <div className="fl">{m.flag_visitante}</div>
-                              <div className="tn">{m.equipo_visitante}</div>
-                            </div>
-                          </div>
-                          <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8, textAlign:'center' }}>
-                            Tu apuesta: <b style={{ color:'var(--txt)' }}>{pred ? `${pred.local}–${pred.visitante}` : 'Sin apuesta'}</b>
-                          </div>
-                        </>
-                      )}
-
+                {visibleMatches.map(m => (
+                  <div key={m.id} className={`match ${m.cerrado ? 'locked' : ''}`} style={{
+                    borderColor: m.en_vivo ? 'rgba(255,90,95,.4)' : undefined,
+                    background: m.en_vivo ? 'rgba(255,90,95,.04)' : undefined,
+                  }}>
+                    <div className="when">
+                      <span>{m.fecha}{m.fecha_inicio ? ` · ${horaCO(m.fecha_inicio)}` : ''} · {m.fase}</span>
                       {m.en_vivo
-                        ? <div className="ofline set" style={{ color:'rgba(255,90,95,.9)', borderColor:'rgba(255,90,95,.3)' }}>⚽ En vivo · score se actualiza automáticamente</div>
+                        ? <span style={{ fontSize:9, fontWeight:700, color:'#fff',
+                            background:'#ff2e2e', borderRadius:5,
+                            padding:'2px 6px', letterSpacing:.5,
+                            animation:'pulse-live 1.4s ease-in-out infinite' }}>⚽ EN VIVO</span>
                         : m.cerrado
-                          ? <div className="ofline set">✓ Resultado final sincronizado</div>
-                          : <div className="ofline pend">Apuestas abiertas · se cierran al arrancar el partido</div>}
+                          ? <span className="lockchip">✓ Final</span>
+                          : null}
                     </div>
-                  )
-                })}
+
+                    {m.en_vivo && (
+                      <div style={{ fontSize:9, color:'rgba(255,90,95,.9)', fontWeight:700,
+                        textTransform:'uppercase', letterSpacing:1, marginBottom:6 }}>
+                        {m.resultado_local !== null ? 'Marcador actual' : 'Partido en curso'}
+                      </div>
+                    )}
+                    <div className="teams" style={{ marginBottom: m.cerrado ? 6 : 0 }}>
+                      <div className="team">
+                        <div className="fl">{m.flag_local}</div>
+                        <div className="tn" style={{ color: m.cerrado && !m.en_vivo ? 'var(--muted)' : undefined }}>{m.equipo_local}</div>
+                      </div>
+                      <div style={{ minWidth:60, textAlign:'center',
+                        fontFamily:"'Anton',sans-serif",
+                        fontSize: m.en_vivo ? 26 : m.cerrado ? 22 : 16,
+                        color: m.en_vivo ? '#ff2e2e' : m.cerrado ? 'var(--txt)' : 'var(--muted)',
+                        letterSpacing:1 }}>
+                        {m.cerrado && m.resultado_local !== null
+                          ? `${m.resultado_local}–${m.resultado_visitante}`
+                          : m.cerrado ? '–' : 'vs'}
+                      </div>
+                      <div className="team">
+                        <div className="fl">{m.flag_visitante}</div>
+                        <div className="tn" style={{ color: m.cerrado && !m.en_vivo ? 'var(--muted)' : undefined }}>{m.equipo_visitante}</div>
+                      </div>
+                    </div>
+
+                    {m.en_vivo
+                      ? <div className="ofline set" style={{ color:'rgba(255,90,95,.9)', borderColor:'rgba(255,90,95,.3)' }}>⚽ En vivo · score se actualiza automáticamente</div>
+                      : m.cerrado
+                        ? <div className="ofline set">✓ Resultado final sincronizado</div>
+                        : <div className="ofline pend">Apuestas abiertas · se cierran al arrancar el partido</div>}
+                  </div>
+                ))}
                 <div className="lockmsg" style={{ marginTop:8 }}>
                   Las apuestas se bloquean automáticamente cuando arranca el partido. El resultado se sincroniza solo al terminar.
                 </div>

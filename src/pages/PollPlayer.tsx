@@ -541,6 +541,7 @@ export default function PollPlayer() {
   const myPos = myRow ? Number(myRow.posicion) : -1
   const nPremios = premios.filter(p => p > 0).length
   const isAdmin = poll.admin_id === session?.user.id
+  const canBet = myMember.pagado
 
   const scopedMatches = matches
   const openMatches = scopedMatches.filter(m => !m.cerrado && poll.estado === 'abierta')
@@ -682,7 +683,7 @@ export default function PollPlayer() {
                   />
                 ) : (
                   <div className="hook warn" style={{ marginBottom:12, textAlign:'left', lineHeight:1.5 }}>
-                    ⏳ <b>Inscripción pendiente</b> — el admin debe confirmar tu pago para que tus puntos cuenten hacia el bote. Igual podés hacer tus apuestas ahora.
+                    🔒 <b>Inscripción pendiente</b> — el admin debe confirmar tu pago antes de que puedas apostar. Contacta al organizador.
                   </div>
                 )
               )}
@@ -712,15 +713,15 @@ export default function PollPlayer() {
                             <div className="tn">{m.equipo_local}</div>
                           </div>
                           <div className="step">
-                            <button onClick={() => updatePred(m.id, 'local', -1)} disabled={(preds[m.id]?.local ?? 0) === 0}>−</button>
+                            <button onClick={() => updatePred(m.id, 'local', -1)} disabled={!canBet || (preds[m.id]?.local ?? 0) === 0}>−</button>
                             <div className="sv">{preds[m.id]?.local ?? 0}</div>
-                            <button onClick={() => updatePred(m.id, 'local', 1)}>+</button>
+                            <button onClick={() => updatePred(m.id, 'local', 1)} disabled={!canBet}>+</button>
                           </div>
                           <div className="midv">:</div>
                           <div className="step">
-                            <button onClick={() => updatePred(m.id, 'visitante', -1)} disabled={(preds[m.id]?.visitante ?? 0) === 0}>−</button>
+                            <button onClick={() => updatePred(m.id, 'visitante', -1)} disabled={!canBet || (preds[m.id]?.visitante ?? 0) === 0}>−</button>
                             <div className="sv">{preds[m.id]?.visitante ?? 0}</div>
-                            <button onClick={() => updatePred(m.id, 'visitante', 1)}>+</button>
+                            <button onClick={() => updatePred(m.id, 'visitante', 1)} disabled={!canBet}>+</button>
                           </div>
                           <div className="team">
                             <div className="fl">{m.flag_visitante}</div>
@@ -734,7 +735,7 @@ export default function PollPlayer() {
                           <button
                             className={`match-save-mini ${ms}`}
                             onClick={() => saveSinglePred(m.id)}
-                            disabled={ms === 'saving'}
+                            disabled={!canBet || ms === 'saving'}
                           >
                             {ms === 'saving' ? '…' : ms === 'saved' ? '✓ Confirmada' : 'Confirmar apuesta'}
                           </button>
@@ -760,7 +761,7 @@ export default function PollPlayer() {
                       <button
                         className={`save ${saveState === 'saved' ? 'done' : ''}`}
                         onClick={savePreds}
-                        disabled={saving}
+                        disabled={!canBet || saving}
                         style={{ marginTop:8 }}
                       >
                         {saving ? 'Guardando...' : saveState === 'saved' ? '✓ Todas confirmadas' : 'Confirmar todas las apuestas'}
