@@ -21,6 +21,12 @@ export const CELO_MAINNET = {
       symbol: 'cUSD',
       name: 'Celo Dollar',
     },
+    COPm: {
+      address: '0x8A567e2aE79CA692Bd748aB832081C45de4041eA' as `0x${string}`,
+      decimals: 18,
+      symbol: 'COPm',
+      name: 'Celo Colombian Peso',
+    },
   },
   escrow: '0xb096A912B8CCa3B6DDD6a845E833e714863a0375' as `0x${string}`,
 }
@@ -51,10 +57,17 @@ export const CELO_SEPOLIA = {
       symbol: 'cUSD',
       name: 'Celo Dollar (testnet)',
     },
+    // COPm no existe en testnet — usar cUSD como placeholder
+    COPm: {
+      address: '0xEF4d55D6dE8e8d73232827Cd1e9b2F2dBb45bC80' as `0x${string}`,
+      decimals: 18,
+      symbol: 'COPm',
+      name: 'Celo Colombian Peso (testnet)',
+    },
   },
 }
 
-export type CeloToken = 'USDC' | 'USDT' | 'cUSD'
+export type CeloToken = 'USDC' | 'USDT' | 'cUSD' | 'COPm'
 
 // Devuelve la config activa según VITE_CHAIN_ID
 export function getActiveConfig() {
@@ -82,12 +95,13 @@ export function getTokenDecimals(token: CeloToken): number {
 }
 
 export function isCryptoMoneda(moneda: string): boolean {
-  return moneda === 'USDC-celo' || moneda === 'USDT-celo' || moneda === 'cUSD'
+  return moneda === 'USDC-celo' || moneda === 'USDT-celo' || moneda === 'cUSD' || moneda === 'COPm'
 }
 
 export function monedaToToken(moneda: string): CeloToken {
   if (moneda === 'USDT-celo') return 'USDT'
   if (moneda === 'cUSD') return 'cUSD'
+  if (moneda === 'COPm') return 'COPm'
   return 'USDC'
 }
 

@@ -39,6 +39,7 @@ const MAINNET_TOKEN_CONFIG: TokenConfig = {
   USDC: { address: '0xcebA9300f2b948710d2653dD7B07f33A8B32118C', decimals: 6 },
   USDT: { address: '0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e', decimals: 6 },
   cUSD: { address: '0x765DE816845861e75A25fCA122bb6898B8B1282a', decimals: 18 },
+  COPm: { address: '0x8A567e2aE79CA692Bd748aB832081C45de4041eA', decimals: 18 },
 }
 
 const SEPOLIA_TOKEN_CONFIG: TokenConfig = {
@@ -101,11 +102,12 @@ export function toAtomics(amount: number, decimals: number): bigint {
 }
 
 export function isCryptoMoneda(moneda: string): boolean {
-  return moneda === 'USDC-celo' || moneda === 'USDT-celo' || moneda === 'cUSD'
+  return moneda === 'USDC-celo' || moneda === 'USDT-celo' || moneda === 'cUSD' || moneda === 'COPm'
 }
 
 export function monedaToTokenSymbol(moneda: string): string {
   if (moneda === 'USDT-celo') return 'USDT'
   if (moneda === 'cUSD') return 'cUSD'
+  if (moneda === 'COPm') return 'COPm'
   return 'USDC'
 }

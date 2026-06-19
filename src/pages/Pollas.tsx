@@ -22,7 +22,7 @@ export default function Pollas() {
   const [showCrear, setShowCrear] = useState(false)
   const [nombre, setNombre] = useState('')
   const [inscripcion, setInscripcion] = useState('2')
-  const [moneda, setMoneda] = useState('USDC-celo')
+  const [moneda, setMoneda] = useState('COPm')
   const [quieroJugar, setQuieroJugar] = useState(false)
   const [contactoEmail, setContactoEmail] = useState('')
   const [contactoTel, setContactoTel] = useState('')
@@ -107,7 +107,7 @@ export default function Pollas() {
 
       setNombre('')
       setInscripcion('2')
-      setMoneda('USDC-celo')
+      setMoneda('COPm')
       setQuieroJugar(false)
       setContactoEmail('')
       setContactoTel('')
@@ -252,7 +252,8 @@ export default function Pollas() {
               <label>Moneda</label>
               <select className="inp" value={moneda} onChange={e => setMoneda(e.target.value)}
                 style={{ cursor:'pointer' }}>
-                <option value="USDC-celo">USDC — Dólar digital en Celo (recomendado)</option>
+                <option value="COPm">COPm — Peso Colombiano en Celo (recomendado)</option>
+                <option value="USDC-celo">USDC — Dólar digital en Celo</option>
                 <option value="USDT-celo">USDT — Tether en Celo</option>
                 <option value="cUSD">cUSD — Celo Dollar nativo</option>
               </select>
