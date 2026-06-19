@@ -135,20 +135,24 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
         args:         [address, escrowAddress],
       }) as bigint
 
+      console.log('[PaymentButton] allowance:', existingAllowance.toString(), 'needed:', amountAtomics.toString())
+
       if (existingAllowance < amountAtomics) {
         setState('approving')
-        // Aprobar el máximo para que futuros pagos no necesiten approve
-        const MAX = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
         const approveHash = await writeContractAsync({
           address:      tokenAddress,
           abi:          ERC20_APPROVE_ABI,
           functionName: 'approve',
-          args:         [escrowAddress, MAX],
+          args:         [escrowAddress, amountAtomics],
         })
         await publicClient.waitForTransactionReceipt({ hash: approveHash })
+        console.log('[PaymentButton] approve ok:', approveHash)
+      } else {
+        console.log('[PaymentButton] allowance sufficient, skip approve')
       }
 
       // ── 3. Deposit: transferir fondos al escrow vinculados a la polla ──────
+      console.log('[PaymentButton] deposit args:', { pollBytes32, tokenAddress, amountAtomics: amountAtomics.toString(), escrowAddress })
       setState('depositing')
       const depositHash = await writeContractAsync({
         address:      escrowAddress,
