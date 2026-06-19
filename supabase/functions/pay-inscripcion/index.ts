@@ -97,6 +97,12 @@ Deno.serve(async (req) => {
     const receipt = await provider.getTransactionReceipt(tx_hash)
 
     if (!receipt || receipt.status !== 1) {
+      // Tx llegó a la cadena pero falló — registrar para auditoría
+      await db.from('poll_payments').insert({
+        poll_id, user_id: user.id, amount: polla.inscripcion, token,
+        chain: 'celo', chain_id: networkChainId, wallet_address: walletAddress,
+        tx_hash, status: 'failed',
+      }).then(({ error: e }) => { if (e) console.error('[pay-inscripcion] log failed tx:', e.message) })
       return json({ error: 'Transacción no confirmada en Celo' }, 400)
     }
 
@@ -122,6 +128,12 @@ Deno.serve(async (req) => {
     }
 
     if (!transferVerified) {
+      // Tx confirmada pero la transferencia no coincide — registrar para auditoría
+      await db.from('poll_payments').insert({
+        poll_id, user_id: user.id, amount: polla.inscripcion, token,
+        chain: 'celo', chain_id: networkChainId, wallet_address: walletAddress,
+        tx_hash, status: 'failed',
+      }).then(({ error: e }) => { if (e) console.error('[pay-inscripcion] log failed tx:', e.message) })
       return json({
         error: 'No se encontró una transferencia válida al monto correcto en esa transacción',
       }, 400)
