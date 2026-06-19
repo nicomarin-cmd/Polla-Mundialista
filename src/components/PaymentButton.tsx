@@ -25,6 +25,16 @@ const ERC20_APPROVE_ABI = [
     outputs: [{ type: 'bool' }],
     stateMutability: 'nonpayable',
   },
+  {
+    name: 'allowance',
+    type: 'function',
+    inputs: [
+      { name: 'owner',   type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
+  },
 ] as const
 
 const ESCROW_DEPOSIT_ABI = [
@@ -115,16 +125,28 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
       const amountAtomics = parseUnits(String(amount), decimals)
       const pollBytes32   = pollIdToBytes32(pollId)
 
-      // ── 2. Approve: autorizar al escrow a mover los tokens ─────────────────
-      setState('approving')
-      const approveHash = await writeContractAsync({
+      if (!publicClient) throw new Error('Cliente RPC no disponible')
+
+      // ── 2. Approve solo si el allowance actual no cubre el monto ───────────
+      const existingAllowance = await publicClient.readContract({
         address:      tokenAddress,
         abi:          ERC20_APPROVE_ABI,
-        functionName: 'approve',
-        args:         [escrowAddress, amountAtomics],
-      })
-      if (!publicClient) throw new Error('Cliente RPC no disponible')
-      await publicClient.waitForTransactionReceipt({ hash: approveHash })
+        functionName: 'allowance',
+        args:         [address, escrowAddress],
+      }) as bigint
+
+      if (existingAllowance < amountAtomics) {
+        setState('approving')
+        // Aprobar el máximo para que futuros pagos no necesiten approve
+        const MAX = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+        const approveHash = await writeContractAsync({
+          address:      tokenAddress,
+          abi:          ERC20_APPROVE_ABI,
+          functionName: 'approve',
+          args:         [escrowAddress, MAX],
+        })
+        await publicClient.waitForTransactionReceipt({ hash: approveHash })
+      }
 
       // ── 3. Deposit: transferir fondos al escrow vinculados a la polla ──────
       setState('depositing')
@@ -223,7 +245,7 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
 
       {state === 'idle' && (
         <div className="lockmsg" style={{ marginTop:6 }}>
-          2 transacciones: approve + depósito en contrato · necesitás CELO para gas
+          Depósito en contrato escrow · puede requerir 1-2 confirmaciones en tu wallet
         </div>
       )}
     </div>
