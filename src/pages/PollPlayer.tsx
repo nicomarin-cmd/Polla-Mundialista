@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
 import { PaymentButton } from '../components/PaymentButton'
 import { isCryptoMoneda } from '../lib/celoTokens'
+import { teamCode } from '../lib/teamCodes'
 import type { Polla, Partido, PollMember, TablaRow, GanadorWithProfile, PollResultado, PollMensaje } from '../types'
 
 const AVCOLS = ['#ffc24b','#d7ff3e','#37e29a','#ff8a3d','#7aa2ff','#ff5a5f','#b48bff','#4be0d6','#ff9ec4','#9bd35a']
@@ -648,6 +649,7 @@ export default function PollPlayer() {
                         </div>
                         <div className="teams">
                           <div className="team">
+                            <div className="code">{teamCode(m.equipo_local)}</div>
                             <div className="tn">{m.equipo_local}</div>
                           </div>
                           <div className="step">
@@ -662,6 +664,7 @@ export default function PollPlayer() {
                             <button onClick={() => updatePred(m.id, 'visitante', 1)} disabled={!canBet}>+</button>
                           </div>
                           <div className="team">
+                            <div className="code">{teamCode(m.equipo_visitante)}</div>
                             <div className="tn">{m.equipo_visitante}</div>
                           </div>
                         </div>
@@ -748,6 +751,7 @@ export default function PollPlayer() {
                             )}
                             <div className="teams">
                               <div className="team">
+                                <div className="code">{teamCode(m.equipo_local)}</div>
                                 <div className="tn" style={{ color: live ? undefined : 'var(--muted)' }}>{m.equipo_local}</div>
                               </div>
                               <div style={{ minWidth:60, textAlign:'center' }}>
@@ -765,6 +769,7 @@ export default function PollPlayer() {
                                 )}
                               </div>
                               <div className="team">
+                                <div className="code">{teamCode(m.equipo_visitante)}</div>
                                 <div className="tn" style={{ color: live ? undefined : 'var(--muted)' }}>{m.equipo_visitante}</div>
                               </div>
                             </div>

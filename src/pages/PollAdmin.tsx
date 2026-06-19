@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
 import { isCryptoMoneda, celoscanTx, monedaToToken } from '../lib/celoTokens'
+import { teamCode } from '../lib/teamCodes'
 import type { Polla, Partido, PollMemberWithProfile, TablaRow, PollPayment, PollResultado, PollMensaje } from '../types'
 
 interface WinnerDist {
@@ -563,6 +564,7 @@ export default function PollAdmin() {
                     )}
                     <div className="teams" style={{ marginBottom: m.cerrado ? 6 : 0 }}>
                       <div className="team">
+                        <div className="code">{teamCode(m.equipo_local)}</div>
                         <div className="tn" style={{ color: m.cerrado && !m.en_vivo ? 'var(--muted)' : undefined }}>{m.equipo_local}</div>
                       </div>
                       <div style={{ minWidth:60, textAlign:'center',
@@ -575,6 +577,7 @@ export default function PollAdmin() {
                           : m.cerrado ? '–' : 'vs'}
                       </div>
                       <div className="team">
+                        <div className="code">{teamCode(m.equipo_visitante)}</div>
                         <div className="tn" style={{ color: m.cerrado && !m.en_vivo ? 'var(--muted)' : undefined }}>{m.equipo_visitante}</div>
                       </div>
                     </div>

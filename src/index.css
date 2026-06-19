@@ -94,8 +94,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;opacity:.04;mi
   margin-bottom:9px;display:flex;justify-content:space-between;align-items:center}
 .lockchip{font-size:9px;font-weight:700;color:var(--gold);background:rgba(255,194,75,.12);padding:2px 7px;border-radius:20px}
 .teams{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.team{display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;min-width:0}
-.team .tn{font-size:11px;font-weight:600;text-align:center}
+.team{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:0}
+.team .code{font-size:10px;font-weight:900;color:var(--lime);font-family:'Anton',sans-serif;letter-spacing:1px;line-height:1}
+.team .tn{font-size:11px;font-weight:600;text-align:center;line-height:1.2}
 .step{display:flex;align-items:center;gap:8px}
 .step button{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);
   color:var(--txt);font-size:16px;font-weight:700;cursor:pointer;line-height:1;display:grid;place-items:center}
