@@ -83,9 +83,27 @@ Deno.serve(async (req) => {
       .select('id, wallet_address')
       .in('id', winnerIds)
 
-    const walletByUser = Object.fromEntries(
-      (profiles ?? []).map((p: any) => [p.id, p.wallet_address])
+    const walletByUser: Record<string, string> = Object.fromEntries(
+      (profiles ?? [])
+        .filter((p: any) => p.wallet_address)
+        .map((p: any) => [p.id, p.wallet_address])
     )
+
+    // Fallback: buscar wallet en poll_payments (guardada al momento del pago)
+    const missingIds = winnerIds.filter((id: string) => !walletByUser[id])
+    if (missingIds.length > 0) {
+      const { data: payments } = await db
+        .from('poll_payments')
+        .select('user_id, wallet_address')
+        .eq('poll_id', poll_id)
+        .in('user_id', missingIds)
+        .in('status', ['confirmed', 'distributed'])
+      for (const p of (payments ?? []) as any[]) {
+        if (p.wallet_address && !walletByUser[p.user_id]) {
+          walletByUser[p.user_id] = p.wallet_address
+        }
+      }
+    }
 
     const tokenSymbol = monedaToTokenSymbol(poll.moneda)
 
