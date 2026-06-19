@@ -315,18 +315,6 @@ export default function PollAdmin() {
   }, [loading, poll, session, pollId, navigate])
 
 
-  const togglePagado = async (member: PollMemberWithProfile) => {
-    const { error } = await supabase.from('poll_members')
-      .update({ pagado: !member.pagado })
-      .eq('poll_id', pollId!)
-      .eq('user_id', member.user_id)
-    if (error) { showToast('Error: ' + error.message); return }
-    setMembers(prev => prev.map(m =>
-      m.user_id === member.user_id ? { ...m, pagado: !m.pagado } : m
-    ))
-    await loadTabla()
-  }
-
   const saveRules = async () => {
     if (!pollId) return
     setSavingRules(true)
@@ -801,6 +789,13 @@ export default function PollAdmin() {
                 <div className="d">
                   Solo los que pagaron compiten por el bote ({pagados.length} pagados · {members.length - pagados.length} pendientes).
                 </div>
+                {isCryptoMoneda(poll.moneda) && (
+                  <div style={{ fontSize:10, color:'var(--lime)', background:'rgba(200,255,60,.07)',
+                    border:'1px solid rgba(200,255,60,.2)', borderRadius:8, padding:'8px 10px',
+                    marginTop:8, lineHeight:1.6 }}>
+                    🔒 <b>Los pagos se verifican automáticamente on-chain.</b> El estado "Pagó" se activa solo cuando la transacción se confirma en Celo — no puede modificarse manualmente.
+                  </div>
+                )}
                 <div style={{ marginTop:8 }}>
                   {members.map((m, i) => {
                     const isAdminUser = m.user_id === poll.admin_id
@@ -821,12 +816,25 @@ export default function PollAdmin() {
                           </div>
                         </div>
                         <div style={{ display:'flex', flexDirection:'column', gap:4, alignItems:'flex-end', flexShrink:0 }}>
-                          <button
-                            className={`toggle ${m.pagado ? 'paid' : 'unpaid'}`}
-                            onClick={() => togglePagado(m)}
-                          >
-                            {m.pagado ? 'Pagó ✓' : 'Pendiente'}
-                          </button>
+                          {(() => {
+                            const pay = payments.find(p => p.user_id === m.user_id && p.status === 'confirmed')
+                            if (m.pagado && pay?.tx_hash) {
+                              return (
+                                <a href={celoscanTx(pay.tx_hash)} target="_blank" rel="noopener noreferrer"
+                                  style={{ fontSize:10, fontWeight:700, color:'var(--win)',
+                                    textDecoration:'none', padding:'3px 8px', borderRadius:6,
+                                    border:'1px solid rgba(55,226,154,.3)', background:'rgba(55,226,154,.08)' }}>
+                                  ✓ Verificado →
+                                </a>
+                              )
+                            }
+                            return (
+                              <span className={`toggle ${m.pagado ? 'paid' : 'unpaid'}`}
+                                style={{ cursor:'default', userSelect:'none' }}>
+                                {m.pagado ? '✓ Pagó' : '⏳ Pendiente'}
+                              </span>
+                            )
+                          })()}
                           {!isAdminUser && (
                             <button
                               onClick={() => expulsarMiembro(m)}
