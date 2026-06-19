@@ -103,6 +103,7 @@ export default function PollAdmin() {
   const [matchView, setMatchView] = useState<'todos' | 'pendientes' | 'cerrados'>('todos')
 
   const [closing, setClosing] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   // Wallets de los potenciales ganadores (cargadas cuando moneda es cripto)
   const [winnerWallets, setWinnerWallets] = useState<Record<string, string | null>>({})
   // Resultado de la distribución cripto (post-cierre)
@@ -346,8 +347,8 @@ export default function PollAdmin() {
 
   const cerrarPolla = async () => {
     if (!pollId || !poll) return
-    if (!confirm('¿Cerrar la polla y repartir el bote? Esta acción no se puede deshacer fácilmente.')) return
     setClosing(true)
+    setConfirmClose(false)
 
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession()
@@ -481,6 +482,8 @@ export default function PollAdmin() {
   const nPremios = premios.filter(p => p > 0).length
   const closedCount = matches.filter(m => m.cerrado).length
   const sumaP = prem0 + prem1 + prem2
+  const isFinalDone = matches.some(m => m.fase === 'Gran Final' && m.cerrado)
+  const pendingMatches = matches.filter(m => !m.cerrado).length
 
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'18px 12px' }}>
@@ -1006,6 +1009,102 @@ export default function PollAdmin() {
                       </div>
                     </div>
                   )}
+
+                  {/* Estado de la Final */}
+                  {isFinalDone ? (
+                    <div className="hook" style={{ marginBottom:12 }}>
+                      ✅ La Gran Final terminó. El sistema cerrará la polla en los próximos minutos automáticamente. También puedes hacerlo ahora.
+                    </div>
+                  ) : (
+                    <div className="hook warn" style={{ marginBottom:12 }}>
+                      {pendingMatches > 0
+                        ? `⏳ Quedan ${pendingMatches} partido(s) sin resultado. La polla se cerrará automáticamente al terminar la Gran Final.`
+                        : '⏳ Esperando que la Gran Final quede registrada en el sistema.'}
+                    </div>
+                  )}
+
+                  {/* Cerrar polla */}
+                  <div className="admin-box" style={{ marginBottom:8 }}>
+                    <div className="admin-box-label">🛡️ Acción de admin</div>
+                    {!confirmClose ? (
+                      <button
+                        className={`save ${isFinalDone ? 'gold' : 'ghost'}`}
+                        onClick={() => setConfirmClose(true)}
+                        disabled={closing || pagados.length === 0}
+                        style={{ margin:0 }}
+                      >
+                        {isFinalDone ? 'Cerrar polla y repartir bote' : '⚠ Cerrar anticipadamente'}
+                      </button>
+                    ) : (
+                      <div>
+                        <div style={{ fontSize:12, color: isFinalDone ? 'var(--txt)' : 'var(--gold)', marginBottom:8, lineHeight:1.5 }}>
+                          {isFinalDone
+                            ? `¿Confirmar? Se repartirán ${fmt(bote)} ${poll.moneda} entre ${nPremios} ganador(es) on-chain.`
+                            : `⚠ Quedan partidos por jugarse. El podio puede cambiar. ¿Cerrar de todas formas?`
+                          }
+                        </div>
+                        <div style={{ display:'flex', gap:8 }}>
+                          <button className="save gold" onClick={cerrarPolla} disabled={closing} style={{ flex:1, margin:0 }}>
+                            {closing ? 'Cerrando...' : 'Confirmar cierre'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmClose(false)}
+                            style={{ flex:1, padding:'10px', borderRadius:10, border:'1px solid var(--line)',
+                              background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer', fontSize:13 }}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {pagados.length === 0 && (
+                      <div style={{ fontSize:10, color:'var(--muted)', marginTop:6 }}>
+                        Sin miembros pagados — no hay bote que repartir.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Cancelar polla */}
+                  <div className="admin-box">
+                    <div className="admin-box-label">⚠ Zona de peligro</div>
+                    {!confirmCancel ? (
+                      <button
+                        onClick={() => setConfirmCancel(true)}
+                        disabled={cancelling}
+                        style={{ width:'100%', padding:'10px', borderRadius:10,
+                          border:'1px solid rgba(255,90,95,.3)', background:'rgba(255,90,95,.07)',
+                          color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700, letterSpacing:.5 }}
+                      >
+                        {pagados.length > 0 ? `Cancelar polla y reembolsar (${pagados.length})` : 'Cancelar polla'}
+                      </button>
+                    ) : (
+                      <div>
+                        <div style={{ fontSize:12, color:'var(--lose)', marginBottom:8, lineHeight:1.5 }}>
+                          {pagados.length > 0
+                            ? `¿Cancelar? Se reembolsarán ${fmt(bote)} ${poll.moneda} a ${pagados.length} participante(s) on-chain.`
+                            : 'Nadie ha pagado. ¿Eliminar la polla?'}
+                        </div>
+                        <div style={{ display:'flex', gap:8 }}>
+                          <button
+                            onClick={cancelarPolla}
+                            disabled={cancelling}
+                            style={{ flex:1, padding:'10px', borderRadius:10,
+                              border:'1px solid rgba(255,90,95,.5)', background:'rgba(255,90,95,.15)',
+                              color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700 }}
+                          >
+                            {cancelling ? 'Cancelando...' : 'Confirmar cancelación'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmCancel(false)}
+                            style={{ flex:1, padding:'10px', borderRadius:10, border:'1px solid var(--line)',
+                              background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer', fontSize:13 }}
+                          >
+                            Volver
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                 </>
               ) : poll.estado === 'cancelada' ? (

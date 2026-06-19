@@ -89,6 +89,8 @@ export interface Ganador {
 
 export interface GanadorWithProfile extends Ganador {
   profiles: { nombre: string } | null
+  tx_hash?: string | null
+  status?: string
 }
 
 export interface PollMensaje {

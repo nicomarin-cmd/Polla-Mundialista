@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
 import { PaymentButton } from '../components/PaymentButton'
-import { isCryptoMoneda } from '../lib/celoTokens'
+import { isCryptoMoneda, celoscanTx, monedaToToken } from '../lib/celoTokens'
 import { teamCode } from '../lib/teamCodes'
 import type { Polla, Partido, PollMember, TablaRow, GanadorWithProfile, PollResultado, PollMensaje } from '../types'
 
@@ -354,6 +354,8 @@ export default function PollPlayer() {
         puesto:   w.position,
         monto:    Number(w.amount_token),
         profiles: w.profiles,
+        tx_hash:  w.tx_hash ?? null,
+        status:   w.status ?? 'pending',
       })) as GanadorWithProfile[])
     }
 
@@ -494,6 +496,7 @@ export default function PollPlayer() {
   const nPremios = premios.filter(p => p > 0).length
   const isAdmin = poll.admin_id === session?.user.id
   const canBet = myMember.pagado
+  const myGanador = ganadores.find(g => g.user_id === session?.user.id)
 
   const scopedMatches = matches
   const openMatches = scopedMatches.filter(m => !m.cerrado && poll.estado === 'abierta')
@@ -509,8 +512,15 @@ export default function PollPlayer() {
 
   const hookMsg = () => {
     if (poll.estado === 'cerrada') {
-      if (myPos > 0 && myPos <= nPremios)
-        return { cls: 'hook', txt: `🏆 ¡Quedaste ${myPos}°! Ganaste ${fmt(bote * premios[myPos - 1] / 100)} ${poll.moneda}` }
+      if (myGanador) {
+        const montoStr = `${fmt(myGanador.monto)} ${monedaToToken(poll.moneda)}`
+        const extra = myGanador.status === 'sent'
+          ? `Recibiste ${montoStr} en tu wallet.`
+          : myGanador.status === 'pending_wallet'
+          ? `Ganaste ${montoStr} — conecta tu wallet para recibirlos.`
+          : `Ganaste el ${premios[myGanador.puesto - 1]}% del bote.`
+        return { cls: 'hook', txt: `🏆 ¡Quedaste ${myGanador.puesto}°! ${extra}` }
+      }
       return { cls: 'hook lose', txt: 'Polla cerrada. Esta vez no alcanzó el podio.' }
     }
     if (!closedMatches.length)
@@ -586,19 +596,46 @@ export default function PollPlayer() {
           {/* Ganadores (si cerrada) */}
           {poll.estado === 'cerrada' && ganadores.length > 0 && (
             <div className="podium-wrap" style={{ marginBottom:14 }}>
-              {ganadores.map(g => (
-                <div key={g.puesto} className={`wcard g${g.puesto}`}>
-                  <div className="wmedal">{MEDALS[g.puesto - 1]}</div>
-                  <div className="winfo">
-                    <div className="wname">{g.profiles?.nombre ?? '—'}</div>
-                    <div className="wsub">{g.puesto}° lugar</div>
+              {ganadores.map(g => {
+                const isMe = g.user_id === session?.user.id
+                const isCrypto = isCryptoMoneda(poll.moneda)
+                return (
+                  <div key={g.puesto} className={`wcard g${g.puesto}`} style={
+                    isMe ? { border:'2px solid var(--lime)', background:'rgba(200,255,60,.06)' } : undefined
+                  }>
+                    <div className="wmedal">{MEDALS[g.puesto - 1]}</div>
+                    <div className="winfo">
+                      <div className="wname">
+                        {g.profiles?.nombre ?? '—'}
+                        {isMe && <span style={{ color:'var(--lime)', fontSize:10, marginLeft:5 }}>· tú</span>}
+                      </div>
+                      <div className="wsub">{g.puesto}° lugar</div>
+                      {isMe && isCrypto && (
+                        g.status === 'sent' && g.tx_hash
+                          ? <a href={celoscanTx(g.tx_hash)} target="_blank" rel="noopener noreferrer"
+                              style={{ fontSize:9, color:'var(--lime)', fontWeight:700, marginTop:3, display:'block' }}>
+                              ✓ Ver transferencia en Celoscan →
+                            </a>
+                          : g.status === 'pending_wallet'
+                          ? <div style={{ fontSize:9, color:'var(--gold)', marginTop:3, fontWeight:700 }}>
+                              Sin wallet · pago pendiente
+                            </div>
+                          : null
+                      )}
+                    </div>
+                    {isMe ? (
+                      <div className="wprize">
+                        <div className="pa" style={{ color:'var(--lime)' }}>{fmt(g.monto)}</div>
+                        <div className="pl">{monedaToToken(poll.moneda)}</div>
+                      </div>
+                    ) : (
+                      <div className="wprize" style={{ minWidth:32 }}>
+                        <div style={{ fontSize:20 }}>🏆</div>
+                      </div>
+                    )}
                   </div>
-                  <div className="wprize">
-                    <div className="pa">{fmt(g.monto)}</div>
-                    <div className="pl">{poll.moneda}</div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 

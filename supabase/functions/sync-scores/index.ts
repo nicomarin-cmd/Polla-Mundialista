@@ -295,6 +295,42 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── 5. Auto-cierre si la Gran Final terminó ──────────────────────────────
+    // Cuando el partido 'Gran Final' queda cerrado, llamar auto-cerrar-pollas
+    // para cerrar todas las pollas abiertas y distribuir premios on-chain.
+    const { data: granFinal } = await db
+      .from('partidos')
+      .select('id')
+      .eq('fase', 'Gran Final')
+      .eq('cerrado', true)
+      .limit(1)
+
+    if (granFinal?.length) {
+      try {
+        const autoCerrarRes = await fetch(
+          `${supabaseUrl}/functions/v1/auto-cerrar-pollas`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${serviceRoleKey}`,
+              'apikey': serviceRoleKey,
+            },
+            body: '{}',
+          }
+        )
+        if (!autoCerrarRes.ok) {
+          const txt = await autoCerrarRes.text()
+          console.error('[sync-scores] auto-cerrar-pollas error:', txt)
+        } else {
+          const autoCerrarData = await autoCerrarRes.json()
+          console.log('[sync-scores] auto-cerrar-pollas:', JSON.stringify(autoCerrarData))
+        }
+      } catch (autoErr: any) {
+        console.error('[sync-scores] Error llamando auto-cerrar-pollas:', autoErr?.message)
+      }
+    }
+
     return json({ ok: true, inserted_matches: inserted, synced, timestamp: now.toISOString() })
 
   } catch (err: any) {
