@@ -80,7 +80,7 @@ function MajorityModal({
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div style={{ marginBottom:6, fontSize:13, fontWeight:600 }}>
-          {match.flag_local} {match.equipo_local} vs {match.equipo_visitante} {match.flag_visitante}
+          {match.equipo_local} vs {match.equipo_visitante}
         </div>
         <div style={{ fontSize:10, color:'var(--muted)', marginBottom:14 }}>
           {total} participante{total !== 1 ? 's' : ''} registraron apuesta
@@ -130,7 +130,7 @@ function ComparacionModal({
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div style={{ marginBottom:4, fontSize:13, fontWeight:600 }}>
-          {match.flag_local} {match.equipo_local} vs {match.equipo_visitante} {match.flag_visitante}
+          {match.equipo_local} vs {match.equipo_visitante}
         </div>
         <div style={{ fontSize:10, color:'var(--muted)', marginBottom:12 }}>
           {betters.length} de {data.length} apostaron
@@ -648,7 +648,6 @@ export default function PollPlayer() {
                         </div>
                         <div className="teams">
                           <div className="team">
-                            <div className="fl">{m.flag_local}</div>
                             <div className="tn">{m.equipo_local}</div>
                           </div>
                           <div className="step">
@@ -663,7 +662,6 @@ export default function PollPlayer() {
                             <button onClick={() => updatePred(m.id, 'visitante', 1)} disabled={!canBet}>+</button>
                           </div>
                           <div className="team">
-                            <div className="fl">{m.flag_visitante}</div>
                             <div className="tn">{m.equipo_visitante}</div>
                           </div>
                         </div>
@@ -750,7 +748,6 @@ export default function PollPlayer() {
                             )}
                             <div className="teams">
                               <div className="team">
-                                <div className="fl">{m.flag_local}</div>
                                 <div className="tn" style={{ color: live ? undefined : 'var(--muted)' }}>{m.equipo_local}</div>
                               </div>
                               <div style={{ minWidth:60, textAlign:'center' }}>
@@ -768,7 +765,6 @@ export default function PollPlayer() {
                                 )}
                               </div>
                               <div className="team">
-                                <div className="fl">{m.flag_visitante}</div>
                                 <div className="tn" style={{ color: live ? undefined : 'var(--muted)' }}>{m.equipo_visitante}</div>
                               </div>
                             </div>
@@ -864,11 +860,11 @@ export default function PollPlayer() {
                       <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                         <div className="info">
                           <div className="ln">
-                            {m.flag_local} {m.equipo_local}
+                            {m.equipo_local}
                             <span className="scorebox" style={{ color: live ? '#ff2e2e' : undefined }}>
                               {m.resultado_local !== null ? `${m.resultado_local}–${m.resultado_visitante}` : '–'}
                             </span>
-                            {m.equipo_visitante} {m.flag_visitante}
+                            {m.equipo_visitante}
                           </div>
                           <div className="sub">
                             Tu apuesta: <b>{pr ? `${pr.local}–${pr.visitante}` : '—'}</b>

@@ -95,7 +95,6 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;opacity:.04;mi
 .lockchip{font-size:9px;font-weight:700;color:var(--gold);background:rgba(255,194,75,.12);padding:2px 7px;border-radius:20px}
 .teams{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .team{display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;min-width:0}
-.team .fl{font-size:26px;line-height:1}
 .team .tn{font-size:11px;font-weight:600;text-align:center}
 .step{display:flex;align-items:center;gap:8px}
 .step button{width:26px;height:26px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);

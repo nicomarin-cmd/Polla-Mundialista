@@ -27,13 +27,12 @@ const TEAM_MAP: Record<string, string> = {
   'Democratic Republic of the Congo': 'RD Congo',
   'Uzbekistan': 'Uzbekistán', 'Colombia': 'Colombia',
   'England': 'Inglaterra', 'Croatia': 'Croacia',
-  // Resto de equipos que pueden llegar a eliminatorias
   'Argentina': 'Argentina', 'Netherlands': 'Países Bajos', 'Belgium': 'Bélgica',
   'Italy': 'Italia', 'Switzerland': 'Suiza', 'Uruguay': 'Uruguay',
   'Ecuador': 'Ecuador', 'Chile': 'Chile', 'Peru': 'Perú',
   'Venezuela': 'Venezuela', 'Bolivia': 'Bolivia',
   'Japan': 'Japón', 'Saudi Arabia': 'Arabia Saudita', 'Iran': 'Irán',
-  'Qatar': 'Catar', 'South Korea': 'Corea del Sur',
+  'Qatar': 'Catar',
   'Nigeria': 'Nigeria', 'Ghana': 'Ghana', 'Cameroon': 'Camerún',
   'Algeria': 'Argelia', 'Egypt': 'Egipto', 'Tunisia': 'Túnez',
   'Ivory Coast': 'Costa de Marfil', "Côte d'Ivoire": 'Costa de Marfil',
@@ -47,32 +46,7 @@ const TEAM_MAP: Record<string, string> = {
   'Greece': 'Grecia', 'China PR': 'China', 'China': 'China',
   'Indonesia': 'Indonesia', 'Thailand': 'Tailandia', 'Vietnam': 'Vietnam',
   'Iraq': 'Irak', 'Jordan': 'Jordania', 'Oman': 'Omán', 'Bahrain': 'Baréin',
-  'Morocco': 'Marruecos', 'Senegal': 'Senegal',
-  'Haiti': 'Haití', 'Curaçao': 'Curazao',
-}
-
-// Emoji de banderas
-const FLAG_MAP: Record<string, string> = {
-  'México': '🇲🇽', 'Sudáfrica': '🇿🇦', 'Corea del Sur': '🇰🇷', 'Chequia': '🇨🇿',
-  'Canadá': '🇨🇦', 'Bosnia': '🇧🇦', 'Brasil': '🇧🇷', 'Marruecos': '🇲🇦',
-  'EE. UU.': '🇺🇸', 'Paraguay': '🇵🇾', 'Australia': '🇦🇺', 'Turquía': '🇹🇷',
-  'Alemania': '🇩🇪', 'Curazao': '🇨🇼', 'España': '🇪🇸', 'Cabo Verde': '🇨🇻',
-  'Francia': '🇫🇷', 'Senegal': '🇸🇳', 'Portugal': '🇵🇹', 'RD Congo': '🇨🇩',
-  'Uzbekistán': '🇺🇿', 'Colombia': '🇨🇴', 'Inglaterra': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'Croacia': '🇭🇷',
-  'Argentina': '🇦🇷', 'Países Bajos': '🇳🇱', 'Bélgica': '🇧🇪', 'Italia': '🇮🇹',
-  'Suiza': '🇨🇭', 'Uruguay': '🇺🇾', 'Ecuador': '🇪🇨', 'Chile': '🇨🇱',
-  'Perú': '🇵🇪', 'Venezuela': '🇻🇪', 'Bolivia': '🇧🇴', 'Japón': '🇯🇵',
-  'Arabia Saudita': '🇸🇦', 'Irán': '🇮🇷', 'Catar': '🇶🇦', 'Nigeria': '🇳🇬',
-  'Ghana': '🇬🇭', 'Camerún': '🇨🇲', 'Argelia': '🇩🇿', 'Egipto': '🇪🇬',
-  'Túnez': '🇹🇳', 'Costa de Marfil': '🇨🇮', 'Nueva Zelanda': '🇳🇿',
-  'Honduras': '🇭🇳', 'Costa Rica': '🇨🇷', 'Jamaica': '🇯🇲', 'Panamá': '🇵🇦',
-  'Trinidad y Tobago': '🇹🇹', 'Guatemala': '🇬🇹', 'Gales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿',
-  'Escocia': '🏴󠁧󠁢󠁳󠁣󠁴󠁿', 'Ucrania': '🇺🇦', 'Polonia': '🇵🇱', 'Serbia': '🇷🇸',
-  'Rumania': '🇷🇴', 'Hungría': '🇭🇺', 'Eslovaquia': '🇸🇰', 'Austria': '🇦🇹',
-  'Dinamarca': '🇩🇰', 'Suecia': '🇸🇪', 'Noruega': '🇳🇴', 'Grecia': '🇬🇷',
-  'China': '🇨🇳', 'Indonesia': '🇮🇩', 'Tailandia': '🇹🇭', 'Vietnam': '🇻🇳',
-  'Irak': '🇮🶺', 'Jordania': '🇯🇴', 'Omán': '🇴🇲', 'Baréin': '🇧🇭',
-  'Haití': '🇭🇹', 'Ganador IC1': '🏳️', 'Ganador IC2': '🏳️',
+  'Haiti': 'Haití',
 }
 
 // Etapas del torneo (API → español)
@@ -87,7 +61,6 @@ const STAGE_MAP: Record<string, string> = {
 }
 
 function norm(name: string): string { return TEAM_MAP[name] ?? name }
-function flag(spanishName: string): string { return FLAG_MAP[spanishName] ?? '🏳️' }
 
 function formatFecha(utcDate: string): string {
   // Colombia es UTC-5 (sin horario de verano)
@@ -184,8 +157,8 @@ Deno.serve(async (req) => {
             fecha_fin:        fechaFin,
             equipo_local:     homeEs,
             equipo_visitante: awayEs,
-            flag_local:       flag(homeEs),
-            flag_visitante:   flag(awayEs),
+            flag_local:       '',
+            flag_visitante:   '',
             destacado:        false,
             api_match_id:     am.id,
           })

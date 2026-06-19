@@ -563,7 +563,6 @@ export default function PollAdmin() {
                     )}
                     <div className="teams" style={{ marginBottom: m.cerrado ? 6 : 0 }}>
                       <div className="team">
-                        <div className="fl">{m.flag_local}</div>
                         <div className="tn" style={{ color: m.cerrado && !m.en_vivo ? 'var(--muted)' : undefined }}>{m.equipo_local}</div>
                       </div>
                       <div style={{ minWidth:60, textAlign:'center',
@@ -576,7 +575,6 @@ export default function PollAdmin() {
                           : m.cerrado ? '–' : 'vs'}
                       </div>
                       <div className="team">
-                        <div className="fl">{m.flag_visitante}</div>
                         <div className="tn" style={{ color: m.cerrado && !m.en_vivo ? 'var(--muted)' : undefined }}>{m.equipo_visitante}</div>
                       </div>
                     </div>
