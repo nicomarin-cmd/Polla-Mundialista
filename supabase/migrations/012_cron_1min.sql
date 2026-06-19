@@ -13,8 +13,8 @@ select cron.schedule(
   '* * * * *',
   $$
   select net.http_post(
-    url     := 'https://dmfxqafwihuhfrlmmmqf.supabase.co/functions/v1/sync-scores',
-    headers := '{"Content-Type":"application/json","X-Sync-Secret":"lcVdvbHuMCrx61tESkQK5ganwWm4fsP0"}'::jsonb,
+    url     := '<TU_SUPABASE_URL>/functions/v1/sync-scores',
+    headers := '{"Content-Type":"application/json","X-Sync-Secret":"<TU_SYNC_SECRET>"}'::jsonb,
     body    := '{}'::jsonb
   ) as request_id;
   $$
