@@ -1,14 +1,13 @@
 // Edge Function: sync-scores
-// Corre cada minuto. Hace dos cosas:
-//   1. Inserta partidos nuevos de eliminatorias cuando la API los confirma
-//   2. Actualiza poll_resultados con scores en vivo / finales para todas las pollas activas
+// Corre cada 5 minutos. Solo llama football-data.org cuando hay un partido en curso
+// o recién terminado (últimos 15 min). Fuera de esas ventanas no gasta llamadas.
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { requireEnv, json, corsHeaders } from '../_shared/utils.ts'
 
 const FOOTBALL_API = 'https://api.football-data.org/v4/competitions/WC/matches'
 
-// API (inglés) → BD (español)
+// Nombres en inglés (API-Football) → español en la BD
 const TEAM_MAP: Record<string, string> = {
   'Mexico': 'México', 'South Africa': 'Sudáfrica',
   'Korea Republic': 'Corea del Sur', 'South Korea': 'Corea del Sur',
@@ -47,9 +46,22 @@ const TEAM_MAP: Record<string, string> = {
   'Indonesia': 'Indonesia', 'Thailand': 'Tailandia', 'Vietnam': 'Vietnam',
   'Iraq': 'Irak', 'Jordan': 'Jordania', 'Oman': 'Omán', 'Bahrain': 'Baréin',
   'Haiti': 'Haití',
+  // API-Football puede usar nombres ligeramente distintos
+  'IR Iran': 'Irán', 'Korea DPR': 'Corea del Norte',
+  'United Arab Emirates': 'Emiratos Árabes',
+  'Cabo Verde': 'Cabo Verde', 'Curaçao': 'Curazao',
 }
 
-// Etapas del torneo (API → español)
+// Round de API-Football → clave interna de etapa
+const ROUND_STAGE: Record<string, string> = {
+  'Round of 32':    'LAST_32',
+  'Round of 16':    'LAST_16',
+  'Quarter-finals': 'QUARTER_FINALS',
+  'Semi-finals':    'SEMI_FINALS',
+  '3rd Place Final':'THIRD_PLACE',
+  'Final':          'FINAL',
+}
+
 const STAGE_MAP: Record<string, string> = {
   'GROUP_STAGE':    'Fase de Grupos',
   'LAST_32':        'Ronda de 32',
@@ -60,20 +72,27 @@ const STAGE_MAP: Record<string, string> = {
   'FINAL':          'Gran Final',
 }
 
+const STAGE_ORDER: Record<string, number> = {
+  'LAST_32': 100, 'LAST_16': 200, 'QUARTER_FINALS': 300,
+  'SEMI_FINALS': 400, 'THIRD_PLACE': 490, 'FINAL': 500,
+}
+
+// Statuses de API-Football que indican partido finalizado
+const FINAL_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD'])
+
 function norm(name: string): string { return TEAM_MAP[name] ?? name }
 
+function getStage(round: string): string {
+  if (!round) return 'UNKNOWN'
+  if (round.startsWith('Group')) return 'GROUP_STAGE'
+  return ROUND_STAGE[round] ?? 'UNKNOWN'
+}
+
 function formatFecha(utcDate: string): string {
-  // Colombia es UTC-5 (sin horario de verano)
   const d = new Date(new Date(utcDate).getTime() - 5 * 60 * 60 * 1000)
   const days  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
   const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
   return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]}`
-}
-
-// Orden base por etapa (group stage usa orden 1-48; KO empieza en 100+)
-const STAGE_ORDER: Record<string, number> = {
-  'LAST_32': 100, 'LAST_16': 200, 'QUARTER_FINALS': 300,
-  'SEMI_FINALS': 400, 'THIRD_PLACE': 490, 'FINAL': 500,
 }
 
 Deno.serve(async (req) => {
@@ -82,17 +101,31 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl    = requireEnv('SUPABASE_URL')
     const serviceRoleKey = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
-    // Sanitizar: elimina cualquier carácter fuera del rango ASCII visible
-    // (comillas, espacios no-breaking, emojis pegados accidentalmente al copiar el key)
     const footballApiKey = requireEnv('FOOTBALL_DATA_API_KEY').replace(/[^\x20-\x7E]/g, '').trim()
-    if (!footballApiKey) return json({ error: 'FOOTBALL_DATA_API_KEY vacío o inválido' }, 500)
+    if (!footballApiKey) return json({ error: 'FOOTBALL_DATA_API_KEY vacío' }, 500)
 
-    // Sin auth requerida: esta función solo lee de football-data.org y escribe scores.
-    // El caller nunca puede inyectar datos — todo viene de la API externa.
+    const db  = createClient(supabaseUrl, serviceRoleKey)
+    const now = new Date()
 
-    const db = createClient(supabaseUrl, serviceRoleKey)
+    // ── 1. ¿Vale la pena llamar a la API ahora? ──────────────────────────────
+    // Llama solo si hay un partido que inició en las últimas 3 horas y aún no
+    // tiene resultado. 3h cubre: 90 min normales + tiempo extra + penales + margen.
+    // En cuanto el sync graba el resultado, esta query ya no lo devuelve → se detiene.
+    const tresHorasAtras = new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString()
 
-    // ── 1. Obtener TODOS los partidos del Mundial de la API ──────────────────
+    const { data: pendientes } = await db
+      .from('partidos')
+      .select('id')
+      .lte('fecha_inicio', now.toISOString())
+      .gte('fecha_inicio', tresHorasAtras)
+      .is('resultado_local', null)
+      .limit(1)
+
+    if (!pendientes?.length) {
+      return json({ ok: true, skipped: true, reason: 'sin partidos activos ni recientes' })
+    }
+
+    // ── 2. Llamar API-Football ───────────────────────────────────────────────
     const apiRes = await fetch(FOOTBALL_API, {
       headers: { 'X-Auth-Token': footballApiKey },
     })
@@ -102,116 +135,107 @@ Deno.serve(async (req) => {
     }
     const { matches: apiMatches = [] }: { matches: any[] } = await apiRes.json()
 
-    // ── 2. Partidos en nuestra BD ────────────────────────────────────────────
+    // ── 3. Partidos en la BD ─────────────────────────────────────────────────
     const { data: dbPartidos, error: dbErr } = await db
       .from('partidos')
-      .select('id, equipo_local, equipo_visitante, api_match_id, orden, fecha_inicio')
+      .select('id, equipo_local, equipo_visitante, api_match_id, orden, fecha_inicio, fecha_fin, resultado_local, resultado_visitante')
     if (dbErr) throw dbErr
 
-    // Índices para búsqueda rápida
-    const byApiId   = new Map<number, any>()
-    const byTeams   = new Map<string, any>()
+    const byApiId = new Map<number, any>()
+    const byTeams = new Map<string, any>()
     for (const p of dbPartidos ?? []) {
       if (p.api_match_id) byApiId.set(p.api_match_id, p)
       byTeams.set(`${p.equipo_local}|${p.equipo_visitante}`, p)
     }
 
-    // ── 3. Procesar cada partido de la API ───────────────────────────────────
+    // ── 4. Procesar cada partido de la API ───────────────────────────────────
     let inserted = 0
     let synced   = 0
-    const now = new Date()
 
     for (const am of apiMatches) {
-      const homeRaw = am.homeTeam?.name ?? ''
-      const awayRaw = am.awayTeam?.name ?? ''
-      const homeEs  = norm(homeRaw)
-      const awayEs  = norm(awayRaw)
+      const homeRaw  = am.homeTeam?.name ?? ''
+      const awayRaw  = am.awayTeam?.name ?? ''
+      const homeEs   = norm(homeRaw)
+      const awayEs   = norm(awayRaw)
+      const stage    = am.stage ?? ''
+      const fixtureId = am.id as number
+      const utcDate   = am.utcDate as string
 
-      // Ignorar si algún equipo es "TBD" (cruces sin definir)
-      if (homeEs === 'TBD' || awayEs === 'TBD' || !homeRaw || !awayRaw) continue
+      if (!homeRaw || !awayRaw || !fixtureId || !utcDate) continue
       if (homeRaw.includes('TBD') || awayRaw.includes('TBD')) continue
+      if (homeEs === 'TBD' || awayEs === 'TBD') continue
 
-      // Log para debug: partidos ya iniciados que no se encuentran en la BD
-      const kickoffDebug = new Date(am.utcDate)
-      if (kickoffDebug <= now) {
-        const found = byApiId.has(am.id) || byTeams.has(`${homeEs}|${awayEs}`) || byTeams.has(`${awayEs}|${homeEs}`)
-        if (!found) console.log(`NO-MATCH api_id=${am.id} raw="${homeRaw}" vs "${awayRaw}" mapped="${homeEs}" vs "${awayEs}" status=${am.status}`)
-      }
+      // Buscar partido en BD
+      let dbPartido = byApiId.get(fixtureId)
+        ?? byTeams.get(`${homeEs}|${awayEs}`)
+        ?? byTeams.get(`${awayEs}|${homeEs}`)
 
-      // Buscar partido existente en BD
-      let dbPartido = byApiId.get(am.id) ?? byTeams.get(`${homeEs}|${awayEs}`) ?? byTeams.get(`${awayEs}|${homeEs}`)
-
-      if (!dbPartido && am.stage !== 'GROUP_STAGE') {
-        // ── Partido de eliminatorias nuevo → insertarlo ──────────────────────
-        const stageLabel = STAGE_MAP[am.stage] ?? am.stage
-        const orden = (STAGE_ORDER[am.stage] ?? 100) + (am.matchday ?? 0)
-        // fecha_fin = kickoff + 150 min (cubre alargue + penaltis en eliminatorias)
-        const fechaFin = new Date(new Date(am.utcDate).getTime() + 150 * 60 * 1000).toISOString()
+      // Partido de eliminatorias nuevo → insertar
+      if (!dbPartido && stage !== 'GROUP_STAGE') {
+        const stageLabel = STAGE_MAP[stage] ?? stage
+        const orden      = (STAGE_ORDER[stage] ?? 100) + (am.matchday ?? 0)
+        const fechaFin   = new Date(new Date(utcDate).getTime() + 150 * 60 * 1000).toISOString()
         const { data: newPartido, error: insErr } = await db
           .from('partidos')
           .insert({
-            orden,
-            fase:             stageLabel,
-            fecha:            formatFecha(am.utcDate),
-            fecha_inicio:     am.utcDate,
-            fecha_fin:        fechaFin,
-            equipo_local:     homeEs,
-            equipo_visitante: awayEs,
-            flag_local:       '',
-            flag_visitante:   '',
-            destacado:        false,
-            api_match_id:     am.id,
+            orden, fase: stageLabel, fecha: formatFecha(utcDate),
+            fecha_inicio: utcDate, fecha_fin: fechaFin,
+            equipo_local: homeEs, equipo_visitante: awayEs,
+            flag_local: '', flag_visitante: '', destacado: false,
+            api_match_id: fixtureId,
           })
-          .select('id, equipo_local, equipo_visitante, api_match_id, orden')
+          .select('id, equipo_local, equipo_visitante, api_match_id, orden, fecha_inicio, fecha_fin, resultado_local, resultado_visitante')
           .single()
         if (!insErr && newPartido) {
           dbPartido = newPartido
-          byApiId.set(am.id, newPartido)
+          byApiId.set(fixtureId, newPartido)
           inserted++
         }
       }
 
-      // Siempre sincronizar api_match_id y fecha_inicio desde la API (fuente autoritativa).
-      // Esto corrige valores precargados en migraciones que puedan estar desajustados.
-      if (dbPartido) {
-        const updates: Record<string, unknown> = {}
-        if (!dbPartido.api_match_id) {
-          updates.api_match_id = am.id
-          dbPartido.api_match_id = am.id
-          byApiId.set(am.id, dbPartido)
-        }
-        // Para eliminatorias: actualizar fecha_inicio desde la API (el horario se confirma tarde).
-        // Para fase de grupos: NO sobreescribir — los horarios vienen de la migración 010 (confirmados
-        // por el usuario). La API del plan gratuito puede tener horarios incorrectos para el WC 2026.
-        if (am.stage !== 'GROUP_STAGE') {
-          const apiDateNorm = new Date(am.utcDate).toISOString()
-          const dbDateNorm  = dbPartido.fecha_inicio ? new Date(dbPartido.fecha_inicio).toISOString() : null
-          if (dbDateNorm !== apiDateNorm) {
-            updates.fecha_inicio = am.utcDate
-            updates.fecha        = formatFecha(am.utcDate)
-            dbPartido.fecha_inicio = am.utcDate
-            updates.fecha_fin = new Date(new Date(am.utcDate).getTime() + 150 * 60 * 1000).toISOString()
-          }
-        }
-        if (Object.keys(updates).length > 0) {
-          await db.from('partidos').update(updates).eq('id', dbPartido.id)
+      if (!dbPartido) continue
+
+      // Actualizar api_match_id si falta
+      const metaUpdates: Record<string, unknown> = {}
+      if (!dbPartido.api_match_id) {
+        metaUpdates.api_match_id = fixtureId
+        dbPartido.api_match_id   = fixtureId
+        byApiId.set(fixtureId, dbPartido)
+      }
+      // Para eliminatorias: actualizar fecha desde la API
+      if (stage !== 'GROUP_STAGE') {
+        const apiDateNorm = new Date(utcDate).toISOString()
+        const dbDateNorm  = dbPartido.fecha_inicio ? new Date(dbPartido.fecha_inicio).toISOString() : null
+        if (dbDateNorm !== apiDateNorm) {
+          metaUpdates.fecha_inicio = utcDate
+          metaUpdates.fecha        = formatFecha(utcDate)
+          metaUpdates.fecha_fin    = new Date(new Date(utcDate).getTime() + 150 * 60 * 1000).toISOString()
+          dbPartido.fecha_inicio   = utcDate
         }
       }
+      if (Object.keys(metaUpdates).length > 0) {
+        await db.from('partidos').update(metaUpdates).eq('id', dbPartido.id)
+      }
 
-      // Solo actualizamos scores si el partido ya empezó
-      if (!dbPartido) continue
-      const kickoff = new Date(am.utcDate)
+      // Fase de grupos: usar fecha_inicio de la BD (más confiable que la API en free tier)
+      const kickoff = (stage === 'GROUP_STAGE' && dbPartido.fecha_inicio)
+        ? new Date(dbPartido.fecha_inicio)
+        : new Date(utcDate)
       if (kickoff > now) continue
 
-      const isFinal = ['FINISHED', 'AWARDED'].includes(am.status)
+      const isFinal    = ['FINISHED', 'AWARDED'].includes(am.status)
+      const dbSaysFinal = dbPartido.fecha_fin ? new Date(dbPartido.fecha_fin) < now : false
+      const treatFinal  = isFinal || dbSaysFinal
 
-      // Para partidos FINALIZADOS: usar SOLO fullTime para no bloquear con el marcador del 1er tiempo.
-      // Si la API aún no tiene fullTime disponible (lag), saltamos este run; el siguiente cron lo corrige.
-      // Para partidos EN VIVO: preferir fullTime, fallback a halfTime (muestra progreso parcial).
       let ft: { home: number; away: number } | null = null
-      if (isFinal) {
+
+      if (treatFinal) {
         if (am.score?.fullTime?.home != null && am.score?.fullTime?.away != null) {
           ft = { home: am.score.fullTime.home as number, away: am.score.fullTime.away as number }
+        }
+        // Fallback: resultado cargado manualmente en partidos
+        else if (dbPartido.resultado_local != null && dbPartido.resultado_visitante != null) {
+          ft = { home: dbPartido.resultado_local as number, away: dbPartido.resultado_visitante as number }
         }
       } else {
         if (am.score?.fullTime?.home != null && am.score?.fullTime?.away != null) {
@@ -220,21 +244,30 @@ Deno.serve(async (req) => {
           ft = { home: am.score.halfTime.home as number, away: am.score.halfTime.away as number }
         }
       }
+
       if (!ft) continue
 
-      const isHomeLocal  = homeEs === dbPartido.equipo_local
-      const golesLocal   = isHomeLocal ? ft.home : ft.away
-      const golesVisita  = isHomeLocal ? ft.away : ft.home
+      const isHomeLocal   = homeEs === dbPartido.equipo_local
+      const golesLocal    = isHomeLocal ? ft.home : ft.away
+      const golesVisita   = isHomeLocal ? ft.away : ft.home
+      const marcarCerrado = treatFinal
 
-      // ── 4a. Actualizar marcador en la tabla partidos (visualización global) ────
+      // ── 4a. Actualizar partidos ──────────────────────────────────────────────
       const partidoUpdate: Record<string, unknown> = {
-        resultado_local: golesLocal,
+        resultado_local:     golesLocal,
         resultado_visitante: golesVisita,
       }
-      if (isFinal) partidoUpdate.cerrado = true
+      if (marcarCerrado) {
+        partidoUpdate.cerrado = true
+        // Sellar fecha_fin con hora real de cierre
+        const nowIso = now.toISOString()
+        if (!dbPartido.fecha_fin || new Date(dbPartido.fecha_fin) > now) {
+          partidoUpdate.fecha_fin = nowIso
+        }
+      }
       await db.from('partidos').update(partidoUpdate).eq('id', dbPartido.id)
 
-      // ── 4b. Actualizar poll_resultados para todas las pollas activas ──────────
+      // ── 4b. Actualizar poll_resultados para todas las pollas abiertas ────────
       const { data: pollas } = await db.from('pollas').select('id').eq('estado', 'abierta')
       if (!pollas?.length) continue
 
@@ -246,10 +279,6 @@ Deno.serve(async (req) => {
 
       const closedPollaIds = new Set((yaClausulados ?? []).map((r: any) => r.poll_id))
 
-      // Cuando isFinal=true: siempre actualizar (incluso si ya estaba cerrado) para corregir
-      // marcadores que se bloquearon con datos parciales en runs anteriores.
-      // Cuando isFinal=false: saltamos registros ya cerrados para no reabrir un partido finalizado.
-      // cerrado es monotónico: una vez true, nunca vuelve a false.
       const upserts = pollas
         .filter((p: any) => !closedPollaIds.has(p.id) || isFinal)
         .map((p: any) => ({
@@ -257,31 +286,16 @@ Deno.serve(async (req) => {
           partido_id:          dbPartido.id,
           resultado_local:     golesLocal,
           resultado_visitante: golesVisita,
-          cerrado:             isFinal || closedPollaIds.has(p.id),
+          cerrado:             marcarCerrado || closedPollaIds.has(p.id),
         }))
 
       if (upserts.length > 0) {
         await db.from('poll_resultados').upsert(upserts, { onConflict: 'poll_id,partido_id' })
         synced++
       }
-
-      // Cuando el partido finaliza, sellar fecha_fin con la hora real
-      // (solo si el estimado aún es futuro: evita sobreescribir una hora real ya guardada)
-      if (isFinal) {
-        const nowIso = new Date().toISOString()
-        await db.from('partidos')
-          .update({ fecha_fin: nowIso })
-          .eq('id', dbPartido.id)
-          .gt('fecha_fin', nowIso)
-      }
     }
 
-    return json({
-      ok: true,
-      inserted_matches: inserted,
-      synced,
-      timestamp: new Date().toISOString(),
-    })
+    return json({ ok: true, inserted_matches: inserted, synced, timestamp: now.toISOString() })
 
   } catch (err: any) {
     console.error('sync-scores:', err)
