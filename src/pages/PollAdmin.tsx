@@ -112,6 +112,9 @@ export default function PollAdmin() {
   const [cancelling, setCancelling] = useState(false)
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [cancelResult, setCancelResult] = useState<RefundResult[]>([])
+  // Eliminación (sin pagos confirmados)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   // Pagos cripto registrados (para tabla en Personas)
   const [payments, setPayments] = useState<PollPayment[]>([])
 
@@ -417,6 +420,19 @@ export default function PollAdmin() {
     } finally {
       setCancelling(false)
     }
+  }
+
+  const eliminarPolla = async () => {
+    if (!pollId) return
+    setDeleting(true)
+    setConfirmDelete(false)
+    const { error } = await supabase.rpc('fn_eliminar_polla', { p_poll_id: pollId })
+    if (error) {
+      showToast('Error: ' + error.message)
+      setDeleting(false)
+      return
+    }
+    navigate('/pollas')
   }
 
   const expulsarMiembro = async (member: PollMemberWithProfile) => {
@@ -1064,46 +1080,92 @@ export default function PollAdmin() {
                     )}
                   </div>
 
-                  {/* Cancelar polla */}
+                  {/* Zona de peligro */}
                   <div className="admin-box">
                     <div className="admin-box-label">⚠ Zona de peligro</div>
-                    {!confirmCancel ? (
-                      <button
-                        onClick={() => setConfirmCancel(true)}
-                        disabled={cancelling}
-                        style={{ width:'100%', padding:'10px', borderRadius:10,
-                          border:'1px solid rgba(255,90,95,.3)', background:'rgba(255,90,95,.07)',
-                          color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700, letterSpacing:.5 }}
-                      >
-                        {pagados.length > 0 ? `Cancelar polla y reembolsar (${pagados.length})` : 'Cancelar polla'}
-                      </button>
-                    ) : (
-                      <div>
-                        <div style={{ fontSize:12, color:'var(--lose)', marginBottom:8, lineHeight:1.5 }}>
-                          {pagados.length > 0
-                            ? `¿Cancelar? Se reembolsarán ${fmt(bote)} ${poll.moneda} a ${pagados.length} participante(s) on-chain.`
-                            : 'Nadie ha pagado. ¿Eliminar la polla?'}
-                        </div>
-                        <div style={{ display:'flex', gap:8 }}>
+
+                    {(() => {
+                      const hasConfirmedPayments = payments.some(p => p.status === 'confirmed')
+
+                      // Sin pagos confirmados → Eliminar (borrado permanente)
+                      if (!hasConfirmedPayments) return (
+                        !confirmDelete ? (
                           <button
-                            onClick={cancelarPolla}
+                            onClick={() => setConfirmDelete(true)}
+                            disabled={deleting}
+                            style={{ width:'100%', padding:'10px', borderRadius:10,
+                              border:'1px solid rgba(255,90,95,.3)', background:'rgba(255,90,95,.07)',
+                              color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700, letterSpacing:.5 }}
+                          >
+                            Eliminar polla
+                          </button>
+                        ) : (
+                          <div>
+                            <div style={{ fontSize:12, color:'var(--lose)', marginBottom:8, lineHeight:1.5 }}>
+                              ¿Eliminar la polla permanentemente? Nadie ha pagado, así que no hay reembolsos.
+                              <b> Esta acción no se puede deshacer.</b>
+                            </div>
+                            <div style={{ display:'flex', gap:8 }}>
+                              <button
+                                onClick={eliminarPolla}
+                                disabled={deleting}
+                                style={{ flex:1, padding:'10px', borderRadius:10,
+                                  border:'1px solid rgba(255,90,95,.5)', background:'rgba(255,90,95,.15)',
+                                  color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700 }}
+                              >
+                                {deleting ? 'Eliminando...' : 'Confirmar eliminación'}
+                              </button>
+                              <button
+                                onClick={() => setConfirmDelete(false)}
+                                style={{ flex:1, padding:'10px', borderRadius:10, border:'1px solid var(--line)',
+                                  background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer', fontSize:13 }}
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      )
+
+                      // Con pagos confirmados → Cancelar y reembolsar
+                      return (
+                        !confirmCancel ? (
+                          <button
+                            onClick={() => setConfirmCancel(true)}
                             disabled={cancelling}
-                            style={{ flex:1, padding:'10px', borderRadius:10,
-                              border:'1px solid rgba(255,90,95,.5)', background:'rgba(255,90,95,.15)',
-                              color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700 }}
+                            style={{ width:'100%', padding:'10px', borderRadius:10,
+                              border:'1px solid rgba(255,90,95,.3)', background:'rgba(255,90,95,.07)',
+                              color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700, letterSpacing:.5 }}
                           >
-                            {cancelling ? 'Cancelando...' : 'Confirmar cancelación'}
+                            Cancelar polla y reembolsar ({pagados.length})
                           </button>
-                          <button
-                            onClick={() => setConfirmCancel(false)}
-                            style={{ flex:1, padding:'10px', borderRadius:10, border:'1px solid var(--line)',
-                              background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer', fontSize:13 }}
-                          >
-                            Volver
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                        ) : (
+                          <div>
+                            <div style={{ fontSize:12, color:'var(--lose)', marginBottom:8, lineHeight:1.5 }}>
+                              ¿Cancelar? Se reembolsarán {fmt(bote)} {poll.moneda} a {pagados.length} participante(s) on-chain.
+                            </div>
+                            <div style={{ display:'flex', gap:8 }}>
+                              <button
+                                onClick={cancelarPolla}
+                                disabled={cancelling}
+                                style={{ flex:1, padding:'10px', borderRadius:10,
+                                  border:'1px solid rgba(255,90,95,.5)', background:'rgba(255,90,95,.15)',
+                                  color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700 }}
+                              >
+                                {cancelling ? 'Cancelando...' : 'Confirmar cancelación'}
+                              </button>
+                              <button
+                                onClick={() => setConfirmCancel(false)}
+                                style={{ flex:1, padding:'10px', borderRadius:10, border:'1px solid var(--line)',
+                                  background:'var(--panel-2)', color:'var(--muted)', cursor:'pointer', fontSize:13 }}
+                              >
+                                Volver
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      )
+                    })()}
                   </div>
 
                 </>
