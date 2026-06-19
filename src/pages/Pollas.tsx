@@ -23,6 +23,7 @@ export default function Pollas() {
   const [nombre, setNombre] = useState('')
   const [inscripcion, setInscripcion] = useState('2')
   const [moneda, setMoneda] = useState('USDC-celo')
+  const [quieroJugar, setQuieroJugar] = useState(false)
   const [contactoEmail, setContactoEmail] = useState('')
   const [contactoTel, setContactoTel] = useState('')
   const [creando, setCreando] = useState(false)
@@ -93,7 +94,7 @@ export default function Pollas() {
       const { error: errMiembro } = await supabase.from('poll_members').insert({
         poll_id: newPoll.id,
         user_id: session.user.id,
-        pagado: true,
+        pagado: false,  // Admin debe pagar como cualquier jugador para pronosticar
       })
       if (errMiembro) throw new Error(errMiembro.message)
 
@@ -107,11 +108,12 @@ export default function Pollas() {
       setNombre('')
       setInscripcion('2')
       setMoneda('USDC-celo')
+      setQuieroJugar(false)
       setContactoEmail('')
       setContactoTel('')
       setShowCrear(false)
       await fetchPollas()
-      navigate(`/pollas/${newPoll.id}/admin`)
+      navigate(`/pollas/${newPoll.id}/admin${quieroJugar ? '?tab=jugar' : ''}`)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error desconocido al crear la polla')
     } finally {
@@ -275,6 +277,25 @@ export default function Pollas() {
                 placeholder="Ej: 20000"
               />
             </div>
+            <div style={{ marginBottom:12 }}>
+              <label style={{ display:'flex', alignItems:'flex-start', gap:10, cursor:'pointer',
+                padding:'11px 12px', borderRadius:10,
+                background: quieroJugar ? 'rgba(200,255,60,.08)' : 'rgba(255,255,255,.03)',
+                border: `1px solid ${quieroJugar ? 'rgba(200,255,60,.3)' : 'var(--line)'}`,
+                transition:'all .15s' }}>
+                <input type="checkbox" checked={quieroJugar} onChange={e => setQuieroJugar(e.target.checked)}
+                  style={{ marginTop:2, accentColor:'var(--lime)', flexShrink:0 }} />
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color: quieroJugar ? 'var(--lime)' : 'var(--txt)' }}>
+                    Quiero participar como jugador también
+                  </div>
+                  <div style={{ fontSize:10, color:'var(--muted)', marginTop:3, lineHeight:1.5 }}>
+                    Pagarás la inscripción igual que cualquier jugador. Podrás hacerlo desde la vista de admin una vez creada la polla.
+                  </div>
+                </div>
+              </label>
+            </div>
+
             <div style={{ borderTop:'1px solid var(--line)', paddingTop:14, marginTop:4 }}>
               <div style={{ fontSize:11, color:'var(--lime)', fontWeight:700, marginBottom:4 }}>
                 📋 Tu información de contacto · visible para los jugadores

@@ -1,11 +1,14 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
+import { PaymentButton } from '../components/PaymentButton'
 import { isCryptoMoneda, celoscanTx, monedaToToken } from '../lib/celoTokens'
 import { teamCode } from '../lib/teamCodes'
 import type { Polla, Partido, PollMemberWithProfile, TablaRow, PollPayment, PollResultado, PollMensaje } from '../types'
+
+type MatchSave = 'idle' | 'saving' | 'saved'
 
 interface WinnerDist {
   user_id: string
@@ -58,6 +61,7 @@ export default function PollAdmin() {
   const { id: pollId } = useParams<{ id: string }>()
   const { session } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const initialLoadDone = useRef(false)
 
@@ -65,9 +69,16 @@ export default function PollAdmin() {
   const [matches, setMatches] = useState<Partido[]>([])
   const [members, setMembers] = useState<PollMemberWithProfile[]>([])
   const [tabla, setTabla] = useState<TablaRow[]>([])
-  const [activeTab, setActiveTab] = useState<'matches' | 'rules' | 'people' | 'close'>('matches')
+  const [activeTab, setActiveTab] = useState<'matches' | 'rules' | 'people' | 'close' | 'jugar'>(
+    searchParams.get('tab') === 'jugar' ? 'jugar' : 'matches'
+  )
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
+
+  // Estado del admin como jugador
+  const [adminPagado, setAdminPagado] = useState(false)
+  const [myPreds, setMyPreds] = useState<Record<string, { local: number; visitante: number }>>({})
+  const [myMatchSaveState, setMyMatchSaveState] = useState<Record<string, MatchSave>>({})
 
   const [exacto, setExacto] = useState(5)
   const [resultado, setResultado] = useState(3)
@@ -170,7 +181,32 @@ export default function PollAdmin() {
 
     setPoll(p)
     setMatches(ms)
-    setMembers((membersData || []) as PollMemberWithProfile[])
+    const membersArr = (membersData || []) as PollMemberWithProfile[]
+    setMembers(membersArr)
+
+    // Estado del admin como jugador
+    const adminMember = membersArr.find(m => m.user_id === userId)
+    const isPagado = adminMember?.pagado ?? false
+    setAdminPagado(isPagado)
+
+    // Cargar predicciones del admin siempre que haya pagado
+    if (isPagado) {
+      const { data: predsData } = await supabase
+        .from('predicciones')
+        .select('*')
+        .eq('poll_id', pollId)
+        .eq('user_id', userId)
+      const predMap: Record<string, { local: number; visitante: number }> = {}
+      const savedIds = new Set<string>()
+      ;((predsData || []) as any[]).forEach(pr => {
+        predMap[pr.partido_id] = { local: pr.pred_local, visitante: pr.pred_visitante }
+        savedIds.add(pr.partido_id)
+      })
+      setMyPreds(predMap)
+      const initSave: Record<string, MatchSave> = {}
+      ms.forEach(m => { initSave[m.id] = savedIds.has(m.id) ? 'saved' : 'idle' })
+      setMyMatchSaveState(initSave)
+    }
 
     if (p) {
       setExacto(p.reglas.exacto)
@@ -405,6 +441,33 @@ export default function PollAdmin() {
     await loadAll()
   }
 
+  const updateAdminPred = (matchId: string, side: 'local' | 'visitante', delta: number) => {
+    setMyPreds(prev => {
+      const cur = prev[matchId] || { local: 0, visitante: 0 }
+      return { ...prev, [matchId]: { ...cur, [side]: Math.max(0, cur[side] + delta) } }
+    })
+    setMyMatchSaveState(prev => ({ ...prev, [matchId]: 'idle' }))
+  }
+
+  const saveAdminPred = async (matchId: string) => {
+    if (!session || !pollId) return
+    setMyMatchSaveState(prev => ({ ...prev, [matchId]: 'saving' }))
+    const { error } = await supabase.from('predicciones').upsert({
+      poll_id: pollId,
+      user_id: session.user.id,
+      partido_id: matchId,
+      pred_local: myPreds[matchId]?.local ?? 0,
+      pred_visitante: myPreds[matchId]?.visitante ?? 0,
+    }, { onConflict: 'poll_id,user_id,partido_id' })
+    if (error) {
+      setMyMatchSaveState(prev => ({ ...prev, [matchId]: 'idle' }))
+      showToast('Error: ' + error.message)
+    } else {
+      setMyMatchSaveState(prev => ({ ...prev, [matchId]: 'saved' }))
+      showToast('Apuesta guardada ✓')
+    }
+  }
+
   const copiarCodigo = () => {
     const url = `${window.location.origin}/pollas?join=${poll?.codigo}`
     navigator.clipboard.writeText(url).then(
@@ -442,17 +505,9 @@ export default function PollAdmin() {
               <small>Admin · #{poll.codigo}</small>
             </div>
           </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:5, alignItems:'flex-end' }}>
-            <div style={{ display:'flex', gap:6 }}>
-              <WalletButton />
-              <button className="back-btn" onClick={() => navigate('/pollas')}>← Salir</button>
-            </div>
-            <div style={{ display:'flex', gap:6 }}>
-              <button className="back-btn" style={{ color:'var(--lime)', borderColor:'rgba(200,255,60,.3)' }}
-                onClick={() => navigate(`/pollas/${pollId}`)}>
-                Vista jugador
-              </button>
-            </div>
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <WalletButton />
+            <button className="back-btn" onClick={() => navigate('/pollas')}>← Salir</button>
           </div>
         </div>
 
@@ -483,6 +538,10 @@ export default function PollAdmin() {
             <div className={`tab ${activeTab === 'rules' ? 'on' : ''}`} onClick={() => setActiveTab('rules')}>Reglas</div>
             <div className={`tab ${activeTab === 'people' ? 'on' : ''}`} onClick={() => setActiveTab('people')}>Gente</div>
             <div className={`tab ${activeTab === 'close' ? 'on' : ''}`} onClick={() => setActiveTab('close')}>Cierre</div>
+            <div className={`tab ${activeTab === 'jugar' ? 'on' : ''}`} onClick={() => setActiveTab('jugar')}
+              style={{ color: adminPagado ? 'var(--lime)' : undefined }}>
+              {adminPagado ? '⚽ Jugar' : '🔒 Jugar'}
+            </div>
           </div>
 
           {/* ---- TAB: Partidos ---- */}
@@ -1066,6 +1125,173 @@ export default function PollAdmin() {
               )}
             </div>
           )}
+
+          {/* ---- TAB: Jugar ---- */}
+          {activeTab === 'jugar' && (() => {
+            const openMatches = matches.filter(m => !m.cerrado && poll.estado === 'abierta')
+            const closedMatches = matches.filter(m => m.cerrado)
+            return (
+              <div>
+                {!adminPagado ? (
+                  <div>
+                    <div className="acard" style={{ borderColor:'rgba(255,194,75,.25)', background:'rgba(255,194,75,.04)', marginBottom:12 }}>
+                      <div className="h" style={{ color:'var(--gold)' }}>🔒 Habilitar como jugador</div>
+                      <div className="d" style={{ lineHeight:1.7 }}>
+                        Eres el organizador, pero <b>no has pagado la inscripción</b> todavía.
+                        Para poder hacer pronósticos y competir por el bote, debes pagar igual que cualquier jugador.
+                      </div>
+                    </div>
+
+                    {isCryptoMoneda(poll.moneda) ? (
+                      <PaymentButton
+                        pollId={poll.id}
+                        amount={poll.inscripcion}
+                        moneda={poll.moneda}
+                        onSuccess={async () => {
+                          setAdminPagado(true)
+                          await loadAll()
+                          showToast('¡Pago confirmado! Ya puedes hacer tus pronósticos.')
+                        }}
+                      />
+                    ) : (
+                      <div className="hook warn" style={{ textAlign:'left', lineHeight:1.5 }}>
+                        💰 Polla en efectivo — pide a otro admin que marque tu pago en la pestaña <b>Gente</b>.
+                      </div>
+                    )}
+
+                    <div className="lockmsg" style={{ marginTop:10 }}>
+                      Mientras no pagues, todas las funciones de apuesta estarán bloqueadas para ti.
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    {openMatches.length === 0 && closedMatches.length === 0 && (
+                      <div className="acard">
+                        <div className="d" style={{ textAlign:'center' }}>No hay partidos disponibles.</div>
+                      </div>
+                    )}
+
+                    {openMatches.length > 0 && (
+                      <>
+                        <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8 }}>
+                          Pronósticos antes de que arranquen los partidos.
+                        </div>
+                        {openMatches.map(m => {
+                          const ms = myMatchSaveState[m.id] || 'idle'
+                          return (
+                            <div key={m.id} className="match">
+                              <div className="when">
+                                <span>{m.fecha}{m.fecha_inicio ? ` · ${horaCO(m.fecha_inicio)}` : ''} · {m.fase}</span>
+                                <span style={{ fontSize:9, color:'var(--muted)' }}>📌 apuesta</span>
+                              </div>
+                              <div className="teams">
+                                <div className="team">
+                                  <div className="code">{teamCode(m.equipo_local)}</div>
+                                  <div className="tn">{m.equipo_local}</div>
+                                </div>
+                                <div className="step">
+                                  <button onClick={() => updateAdminPred(m.id, 'local', -1)} disabled={(myPreds[m.id]?.local ?? 0) === 0}>−</button>
+                                  <div className="sv">{myPreds[m.id]?.local ?? 0}</div>
+                                  <button onClick={() => updateAdminPred(m.id, 'local', 1)}>+</button>
+                                </div>
+                                <div className="midv">:</div>
+                                <div className="step">
+                                  <button onClick={() => updateAdminPred(m.id, 'visitante', -1)} disabled={(myPreds[m.id]?.visitante ?? 0) === 0}>−</button>
+                                  <div className="sv">{myPreds[m.id]?.visitante ?? 0}</div>
+                                  <button onClick={() => updateAdminPred(m.id, 'visitante', 1)}>+</button>
+                                </div>
+                                <div className="team">
+                                  <div className="code">{teamCode(m.equipo_visitante)}</div>
+                                  <div className="tn">{m.equipo_visitante}</div>
+                                </div>
+                              </div>
+                              <div style={{ display:'flex', justifyContent:'flex-end', marginTop:10 }}>
+                                <button
+                                  className={`match-save-mini ${ms}`}
+                                  onClick={() => saveAdminPred(m.id)}
+                                  disabled={ms === 'saving'}
+                                >
+                                  {ms === 'saving' ? '…' : ms === 'saved' ? '✓ Confirmada' : 'Confirmar apuesta'}
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                        <div className="lockmsg">🔒 Cada apuesta se bloquea automáticamente cuando arranca el partido</div>
+                      </>
+                    )}
+
+                    {closedMatches.length > 0 && (
+                      <div style={{ marginTop: openMatches.length > 0 ? 18 : 0 }}>
+                        <div className="elimhdr" style={{ marginBottom:8 }}>
+                          🔒 {openMatches.length > 0 ? 'Partidos ya cerrados' : 'Todos los partidos cerrados'}
+                        </div>
+                        {closedMatches.map(m => {
+                          const pr = myPreds[m.id]
+                          const hasResult = m.resultado_local !== null
+                          return (
+                            <div key={m.id} className="match" style={{
+                              borderColor: m.en_vivo ? 'rgba(255,90,95,.4)' : 'rgba(255,255,255,.08)',
+                              background: m.en_vivo ? 'rgba(255,90,95,.04)' : undefined,
+                            }}>
+                              <div className="when">
+                                <span style={{ color:'var(--muted)' }}>{m.fecha} · {m.fase}</span>
+                                {m.en_vivo
+                                  ? <span style={{ fontSize:9, fontWeight:700, color:'#fff', background:'#ff2e2e', borderRadius:5, padding:'2px 6px', letterSpacing:.5, animation:'pulse-live 1.4s ease-in-out infinite' }}>⚽ EN VIVO</span>
+                                  : <span style={{ fontSize:9, color:'var(--muted)', fontWeight:700 }}>✓ Final</span>
+                                }
+                              </div>
+                              <div className="teams">
+                                <div className="team">
+                                  <div className="code">{teamCode(m.equipo_local)}</div>
+                                  <div className="tn" style={{ color:'var(--muted)' }}>{m.equipo_local}</div>
+                                </div>
+                                <div style={{ minWidth:60, textAlign:'center', fontFamily:"'Anton',sans-serif", fontSize:20, color: m.en_vivo ? '#ff2e2e' : 'var(--txt)', letterSpacing:1 }}>
+                                  {hasResult ? `${m.resultado_local}–${m.resultado_visitante}` : '–'}
+                                </div>
+                                <div className="team">
+                                  <div className="code">{teamCode(m.equipo_visitante)}</div>
+                                  <div className="tn" style={{ color:'var(--muted)' }}>{m.equipo_visitante}</div>
+                                </div>
+                              </div>
+                              <div style={{ textAlign:'center', fontSize:10, color:'var(--muted)', marginTop:6 }}>
+                                Tu apuesta: <b style={{ color:'var(--txt)' }}>{pr ? `${pr.local}–${pr.visitante}` : 'Sin apuesta'}</b>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {tabla.length > 0 && (
+                      <div className="acard" style={{ marginTop:14 }}>
+                        <div className="h">Tabla de posiciones</div>
+                        {tabla.map((row, i) => {
+                          const isMe = row.user_id === session?.user.id
+                          const inPodium = i < nPremios
+                          return (
+                            <div key={row.user_id} className={`lbrow ${isMe ? 'me' : ''} ${inPodium ? 'podium' : ''}`}>
+                              <div className={`rk ${i < 3 ? 'top' : ''}`}>{i + 1}</div>
+                              <div className="av" style={{ background: AVCOLS[i % AVCOLS.length] }}>
+                                {row.nombre[0]?.toUpperCase()}
+                              </div>
+                              <div className="nm">
+                                {row.nombre}{isMe ? ' · tú' : ''}
+                                {inPodium && <small>· podio</small>}
+                                <small>{row.exactos} exactos · {row.resultados} resultados</small>
+                              </div>
+                              <div className="pp">{row.puntos} <small>pts</small></div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
         </div>
 
         <Toast msg={toast} />
