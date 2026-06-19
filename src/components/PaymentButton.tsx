@@ -85,6 +85,18 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
 
   const handlePay = async () => {
     if (!isConnected || !address || !session) return
+    if (amount <= 0) {
+      // Polla gratuita — solo registrar sin transacción on-chain
+      const { data: { session: s } } = await supabase.auth.getSession()
+      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pay-inscripcion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
+        body: JSON.stringify({ poll_id: pollId, wallet_address: address, token, tx_hash: null, amount: '0', chain_id: targetChainId }),
+      })
+      setState('done')
+      onSuccess()
+      return
+    }
     if (!escrowAddress) {
       setErrMsg('Error de configuración: contrato de escrow no configurado.')
       setState('error')
