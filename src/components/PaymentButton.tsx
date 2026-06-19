@@ -1,9 +1,13 @@
 import { useState } from 'react'
-import { useAccount, useChainId, useSwitchChain, useWriteContract, usePublicClient } from 'wagmi'
-import { parseUnits, keccak256, toHex } from 'viem'
+import { useAccount, useChainId, useSwitchChain, useWriteContract } from 'wagmi'
+import { parseUnits, keccak256, toHex, createPublicClient, http } from 'viem'
+import { celo } from 'viem/chains'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { CELO_MAINNET, monedaToToken, celoscanTx, getTokenDecimals, getTokenAddress } from '../lib/celoTokens'
+
+// Cliente Celo fijo — independiente de qué cadena tenga conectada el wallet
+const celoClient = createPublicClient({ chain: celo, transport: http('https://forno.celo.org') })
 
 interface Props {
   pollId:    string
@@ -61,7 +65,6 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
   const chainId                    = useChainId()
   const { switchChainAsync }       = useSwitchChain()
   const { writeContractAsync }     = useWriteContract()
-  const publicClient               = usePublicClient()
   const { session }                = useAuth()
 
   const [state,  setState]  = useState<PayState>('idle')
@@ -125,10 +128,8 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
       const amountAtomics = parseUnits(String(amount), decimals)
       const pollBytes32   = pollIdToBytes32(pollId)
 
-      if (!publicClient) throw new Error('Cliente RPC no disponible')
-
       // ── 2. Approve solo si el allowance actual no cubre el monto ───────────
-      const existingAllowance = await publicClient.readContract({
+      const existingAllowance = await celoClient.readContract({
         address:      tokenAddress,
         abi:          ERC20_APPROVE_ABI,
         functionName: 'allowance',
@@ -145,7 +146,7 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
           functionName: 'approve',
           args:         [escrowAddress, amountAtomics],
         })
-        await publicClient.waitForTransactionReceipt({ hash: approveHash })
+        await celoClient.waitForTransactionReceipt({ hash: approveHash })
         console.log('[PaymentButton] approve ok:', approveHash)
       } else {
         console.log('[PaymentButton] allowance sufficient, skip approve')
@@ -162,7 +163,7 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
       })
 
       setState('processing')
-      await publicClient.waitForTransactionReceipt({ hash: depositHash })
+      await celoClient.waitForTransactionReceipt({ hash: depositHash })
 
       // ── 4. Registrar en Supabase ───────────────────────────────────────────
       const data = await callEdgeFunction({
