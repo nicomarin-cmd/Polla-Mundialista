@@ -6,7 +6,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 import { ethers } from 'npm:ethers@6'
 import {
   requireEnv, validateAddress, json, corsHeaders,
-  getNetworkConfig, toAtomics,
+  getNetworkConfig, toAtomics, getEscrowAddress,
 } from '../_shared/utils.ts'
 
 // keccak256("Transfer(address,address,uint256)")
@@ -19,6 +19,7 @@ Deno.serve(async (req) => {
     const supabaseUrl     = requireEnv('SUPABASE_URL')
     const serviceRoleKey  = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
     const platformAddress = validateAddress(requireEnv('PLATFORM_OPERATOR_ADDRESS'))
+    const escrowAddress   = validateAddress(getEscrowAddress())
 
     // ── 1. Auth JWT ──────────────────────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization')
@@ -117,9 +118,10 @@ Deno.serve(async (req) => {
       const to    = ('0x' + log.topics[2].slice(26)).toLowerCase()
       const value = BigInt(log.data)
 
+      const validRecipient = to === escrowAddress.toLowerCase() || to === platformAddress.toLowerCase()
       if (
         from  === walletAddress.toLowerCase() &&
-        to    === platformAddress.toLowerCase() &&
+        validRecipient &&
         value >= expectedAtomics
       ) {
         transferVerified = true
