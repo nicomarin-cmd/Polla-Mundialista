@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { useWalletSync } from './hooks/useWalletSync'
+import { useMiniPayAutoConnect } from './hooks/useMiniPay'
 import Auth from './pages/Auth'
 import Pollas from './pages/Pollas'
 import PollPlayer from './pages/PollPlayer'
@@ -32,6 +33,7 @@ function AdminWrapper() {
 function AppRoutes() {
   const { session, loading } = useAuth()
   useWalletSync()
+  useMiniPayAutoConnect()
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh' }}>
       <div style={{ color:'var(--lime)', fontFamily:"'Anton',sans-serif", fontSize:16, letterSpacing:2 }}>

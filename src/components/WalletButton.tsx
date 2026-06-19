@@ -1,7 +1,11 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit'
+import { isMiniPayBrowser } from '../hooks/useMiniPay'
 
 // Botón de wallet estilizado para el header de la app (diseño negro/lima)
 export function WalletButton() {
+  // Dentro de MiniPay no se muestra el botón — la wallet se conecta automáticamente
+  if (isMiniPayBrowser()) return null
+
   return (
     <ConnectButton.Custom>
       {({ account, chain, openAccountModal, openChainModal, openConnectModal, mounted }) => {

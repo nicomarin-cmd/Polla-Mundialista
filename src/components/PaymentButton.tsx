@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAccount, useChainId, useSwitchChain, useWriteContract } from 'wagmi'
+import { isMiniPayBrowser } from '../hooks/useMiniPay'
 import { parseUnits, keccak256, toHex, createPublicClient, http } from 'viem'
 import { celo } from 'viem/chains'
 import { supabase } from '../lib/supabase'
@@ -145,6 +146,7 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
           abi:          ERC20_APPROVE_ABI,
           functionName: 'approve',
           args:         [escrowAddress, amountAtomics],
+          type:         'legacy',
         })
         await celoClient.waitForTransactionReceipt({ hash: approveHash })
         console.log('[PaymentButton] approve ok:', approveHash)
@@ -160,6 +162,7 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
         abi:          ESCROW_DEPOSIT_ABI,
         functionName: 'deposit',
         args:         [pollBytes32, tokenAddress, amountAtomics],
+        type:         'legacy',
       })
 
       setState('processing')
@@ -191,6 +194,13 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
   }
 
   if (!isConnected) {
+    if (isMiniPayBrowser()) {
+      return (
+        <div className="hook warn" style={{ marginBottom:12, textAlign:'left', lineHeight:1.6 }}>
+          <b>Conectando wallet...</b>
+        </div>
+      )
+    }
     return (
       <div className="hook warn" style={{ marginBottom:12, textAlign:'left', lineHeight:1.6 }}>
         <b>Conectá tu wallet para pagar</b><br />
