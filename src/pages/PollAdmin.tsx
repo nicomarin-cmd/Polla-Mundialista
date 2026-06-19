@@ -104,6 +104,7 @@ export default function PollAdmin() {
 
   const [closing, setClosing] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
+  const [closeError, setCloseError] = useState('')
   // Wallets de los potenciales ganadores (cargadas cuando moneda es cripto)
   const [winnerWallets, setWinnerWallets] = useState<Record<string, string | null>>({})
   // Resultado de la distribución cripto (post-cierre)
@@ -353,6 +354,7 @@ export default function PollAdmin() {
     setClosing(true)
     setConfirmClose(false)
 
+    setCloseError('')
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession()
       const res = await fetch(
@@ -367,11 +369,14 @@ export default function PollAdmin() {
         }
       )
       const data = await res.json()
+      console.log('[cerrarPolla] response:', res.status, data)
       if (!res.ok) throw new Error(data.error ?? 'Error al cerrar')
       if (data.distribution) setDistResult(data.distribution)
       showToast(isCryptoMoneda(poll.moneda) ? '¡Polla cerrada! Cripto distribuida a ganadores.' : '¡Polla cerrada! Ganadores registrados.')
     } catch (err: unknown) {
-      showToast('Error: ' + (err instanceof Error ? err.message : 'Error desconocido'))
+      const msg = err instanceof Error ? err.message : 'Error desconocido'
+      setCloseError(msg)
+      showToast('Error: ' + msg)
     } finally {
       setClosing(false)
     }
@@ -1301,6 +1306,13 @@ export default function PollAdmin() {
                       >
                         {closing ? 'Distribuyendo...' : 'Reintentar distribución on-chain'}
                       </button>
+                      {closeError && (
+                        <div style={{ marginTop:8, padding:'8px 10px', borderRadius:8,
+                          background:'rgba(255,90,95,.08)', border:'1px solid rgba(255,90,95,.3)',
+                          fontSize:10, color:'var(--lose)', wordBreak:'break-all', lineHeight:1.5 }}>
+                          {closeError}
+                        </div>
+                      )}
                     </div>
                   )}
 
