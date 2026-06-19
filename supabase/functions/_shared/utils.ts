@@ -33,12 +33,41 @@ export function json(data: unknown, status = 200): Response {
 }
 
 // ── Configuración de tokens ───────────────────────────────────────────────────
-export const TOKEN_CONFIG: Record<string, { address: string; decimals: number }> = {
+type TokenConfig = Record<string, { address: string; decimals: number }>
+
+const MAINNET_TOKEN_CONFIG: TokenConfig = {
   USDC: { address: '0xcebA9300f2b948710d2653dD7B07f33A8B32118C', decimals: 6 },
   USDT: { address: '0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e', decimals: 6 },
   cUSD: { address: '0x765DE816845861e75A25fCA122bb6898B8B1282a', decimals: 18 },
 }
 
+const SEPOLIA_TOKEN_CONFIG: TokenConfig = {
+  USDC: { address: '0x01C5C0122039549AD1493B8220cABEdD739BC44E', decimals: 6 },
+  USDT: { address: '0xd077A400968890Eacc75cdc901F0356c943e4fDb', decimals: 6 },
+  cUSD: { address: '0xEF4d55D6dE8e8d73232827Cd1e9b2F2dBb45bC80', decimals: 18 },
+}
+
+const NETWORK_CONFIG: Record<number, { tokenConfig: TokenConfig; rpc: string; explorer: string }> = {
+  42220: {
+    tokenConfig: MAINNET_TOKEN_CONFIG,
+    rpc: 'https://forno.celo.org',
+    explorer: 'https://celoscan.io',
+  },
+  11142220: {
+    tokenConfig: SEPOLIA_TOKEN_CONFIG,
+    rpc: 'https://forno.celo-sepolia.celo-testnet.org',
+    explorer: 'https://celo-sepolia.blockscout.com',
+  },
+}
+
+export function getNetworkConfig(chainId: number) {
+  const cfg = NETWORK_CONFIG[chainId]
+  if (!cfg) throw new Error(`Chain ID no soportado: ${chainId}. Soportados: 42220 (mainnet), 11142220 (Sepolia)`)
+  return cfg
+}
+
+// Compatibilidad hacia atrás — mainnet por defecto
+export const TOKEN_CONFIG = MAINNET_TOKEN_CONFIG
 export const CELO_RPC = 'https://forno.celo.org'
 
 /** Convierte monto en unidades legibles (ej. 10.50) a atomics según decimales del token. */
