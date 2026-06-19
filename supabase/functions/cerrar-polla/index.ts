@@ -53,15 +53,24 @@ Deno.serve(async (req) => {
     if (poll.estado === 'cerrada') {
       const { data: existing } = await db
         .from('poll_winners').select('*').eq('poll_id', poll_id).order('position')
-      return json({ success: true, already_closed: true, distribution: existing ?? [] })
+
+      // Si hay ganadores con pending_wallet (distribución incompleta), reintentar
+      const hasPendingWallet = existing?.some((w: any) => w.status === 'pending_wallet')
+      const hasSent          = existing?.some((w: any) => w.status === 'sent')
+      if (!hasPendingWallet || hasSent) {
+        return json({ success: true, already_closed: true, distribution: existing ?? [] })
+      }
+      // Sigue hacia abajo para reintentar la distribución on-chain
     }
     if (poll.estado !== 'abierta') {
       return json({ error: `No se puede cerrar una polla en estado '${poll.estado}'` }, 400)
     }
 
     // ── 5. Cerrar polla y calcular ganadores (SQL) ────────────────────────────
-    const { error: closeErr } = await userClient.rpc('fn_cerrar_polla', { p_poll_id: poll_id })
-    if (closeErr) return json({ error: 'Error al cerrar: ' + closeErr.message }, 500)
+    if (poll.estado === 'abierta') {
+      const { error: closeErr } = await userClient.rpc('fn_cerrar_polla', { p_poll_id: poll_id })
+      if (closeErr) return json({ error: 'Error al cerrar: ' + closeErr.message }, 500)
+    }
 
     if (!crypto) return json({ success: true, crypto: false })
 
@@ -108,6 +117,12 @@ Deno.serve(async (req) => {
     const tokenSymbol = monedaToTokenSymbol(poll.moneda)
 
     // ── 8. Calcular winners y BPS para el contrato ────────────────────────────
+    // Limpiar pending_wallet anteriores antes de reintentar
+    await db.from('poll_winners')
+      .delete()
+      .eq('poll_id', poll_id)
+      .eq('status', 'pending_wallet')
+
     // premios es [50, 30, 20] → BPS [5000, 3000, 2000]
     const premios: number[] = poll.premios ?? []
     const winnerAddresses: string[] = []
