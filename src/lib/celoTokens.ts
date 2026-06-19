@@ -22,14 +22,7 @@ export const CELO_MAINNET = {
       name: 'Celo Dollar',
     },
   },
-  escrow: {
-    operator:        '0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6' as `0x${string}`,
-    escrow:          '0x320a3c35F131E5D2Fb36af56345726B298936037' as `0x${string}`,
-    tokenCollector:  '0x230fd3A171750FA45db2976121376b7F47Cba308' as `0x${string}`,
-    protocolFee:     '0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838' as `0x${string}`,
-    refundRequest:   '0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98' as `0x${string}`,
-  },
-  facilitatorUrl: 'https://facilitator.ultravioletadao.xyz',
+  escrow: '0xb096A912B8CCa3B6DDD6a845E833e714863a0375' as `0x${string}`,
 }
 
 // Celo Sepolia — testnet L2 de Celo (reemplaza Alfajores)
