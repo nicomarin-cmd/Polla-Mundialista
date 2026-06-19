@@ -53,7 +53,17 @@ Deno.serve(async (req) => {
         .from('poll_payments').select('*').eq('poll_id', poll_id).order('created_at')
       return json({ success: true, already_cancelled: true, refunds: existing ?? [] })
     }
-    if (poll.estado !== 'abierta') {
+
+    // Permitir también cancelar pollas "cerradas" con distribución incompleta
+    if (poll.estado === 'cerrada' && crypto) {
+      const { data: winners } = await db
+        .from('poll_winners').select('status').eq('poll_id', poll_id)
+      const hasSent = (winners ?? []).some((w: any) => w.status === 'sent')
+      if (hasSent) {
+        return json({ error: 'No se puede cancelar: ya se distribuyeron fondos a ganadores' }, 400)
+      }
+      // Sin distribución exitosa → permitir cancelar para reembolsar
+    } else if (poll.estado !== 'abierta') {
       return json({ error: `No se puede cancelar una polla en estado '${poll.estado}'` }, 400)
     }
 
@@ -125,6 +135,7 @@ Deno.serve(async (req) => {
     const msg = err instanceof Error ? err.message : 'Error interno'
     console.error('[cancelar-polla]', msg)
     const isUserError = msg.includes('faltante') || msg.includes('inválid') || msg.includes('Solo el admin')
-    return json({ error: isUserError ? msg : 'Error al cancelar la polla' }, isUserError ? 400 : 500)
+      || msg.includes('cancelar') || msg.includes('distribuir')
+    return json({ error: msg }, isUserError ? 400 : 500)
   }
 })
