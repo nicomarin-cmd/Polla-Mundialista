@@ -64,7 +64,12 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
   }
 
   const handlePay = async () => {
-    if (!isConnected || !address || !session || !platformWallet) return
+    if (!isConnected || !address || !session) return
+    if (!platformWallet) {
+      setErrMsg('Error de configuración: billetera de destino no configurada. Contactá al administrador.')
+      setState('error')
+      return
+    }
     setErrMsg('')
 
     try {
