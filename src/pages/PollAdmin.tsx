@@ -1291,21 +1291,32 @@ export default function PollAdmin() {
                     </div>
                   )}
 
-                  {/* Reintentar distribución si quedaron pending_wallet */}
+                  {/* Reintentar distribución o cancelar si quedaron pending_wallet */}
                   {isCryptoMoneda(poll.moneda) && distResult.some(d => d.status === 'pending_wallet') && (
                     <div className="admin-box" style={{ marginBottom:8, borderColor:'rgba(255,194,75,.3)', background:'rgba(255,194,75,.04)' }}>
                       <div className="admin-box-label" style={{ color:'var(--gold)' }}>⚠ Distribución incompleta</div>
                       <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8, lineHeight:1.5 }}>
-                        Uno o más ganadores quedaron pendientes. Ahora que las wallets están disponibles, podés reintentar.
+                        Los fondos siguen en el escrow. Podés reintentar la distribución, o cancelar para reembolsar a los participantes.
                       </div>
-                      <button
-                        className="save gold"
-                        style={{ margin:0 }}
-                        disabled={closing}
-                        onClick={cerrarPolla}
-                      >
-                        {closing ? 'Distribuyendo...' : 'Reintentar distribución on-chain'}
-                      </button>
+                      <div style={{ display:'flex', gap:8 }}>
+                        <button
+                          className="save gold"
+                          style={{ margin:0, flex:1 }}
+                          disabled={closing || cancelling}
+                          onClick={cerrarPolla}
+                        >
+                          {closing ? 'Distribuyendo...' : 'Reintentar distribución'}
+                        </button>
+                        <button
+                          style={{ flex:1, padding:'10px', borderRadius:10,
+                            border:'1px solid rgba(255,90,95,.4)', background:'rgba(255,90,95,.08)',
+                            color:'var(--lose)', cursor:'pointer', fontSize:12, fontWeight:700 }}
+                          disabled={closing || cancelling}
+                          onClick={cancelarPolla}
+                        >
+                          {cancelling ? 'Cancelando...' : 'Cancelar y reembolsar'}
+                        </button>
+                      </div>
                       {closeError && (
                         <div style={{ marginTop:8, padding:'8px 10px', borderRadius:8,
                           background:'rgba(255,90,95,.08)', border:'1px solid rgba(255,90,95,.3)',
