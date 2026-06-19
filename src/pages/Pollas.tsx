@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { WalletButton } from '../components/WalletButton'
-import { isCryptoMoneda } from '../lib/celoTokens'
+import { isCryptoMoneda, isTestnet } from '../lib/celoTokens'
 import type { Polla } from '../types'
 
 function genCodigo() {
@@ -173,7 +173,19 @@ export default function Pollas() {
         <div className="body">
           <div className="hero">
             <div className="pot" style={{ fontSize:24 }}>Mis Pollas</div>
-            <div className="cap">Mundial 2026 · tus grupos</div>
+            <div className="cap">
+              Mundial 2026 · tus grupos
+              {isTestnet() && (
+                <span style={{
+                  marginLeft:8, fontSize:9, fontWeight:700, padding:'2px 7px',
+                  borderRadius:20, background:'rgba(255,138,61,.18)',
+                  color:'#ff8a3d', border:'1px solid rgba(255,138,61,.4)',
+                  verticalAlign:'middle', letterSpacing:1,
+                }}>
+                  TESTNET · Celo Sepolia
+                </span>
+              )}
+            </div>
           </div>
 
           <div style={{ display:'flex', gap:8, marginBottom:16 }}>

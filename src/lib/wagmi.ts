@@ -9,13 +9,14 @@ import {
   rainbowWallet,
   phantomWallet,
 } from '@rainbow-me/rainbowkit/wallets'
-import { celo, celoAlfajores } from 'wagmi/chains'
+import { celo } from 'wagmi/chains'
+import { celoSepolia } from 'viem/chains'
 
 export const wagmiConfig = getDefaultConfig({
   appName: 'Polla Mundial 2026',
   projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID ?? '',
-  // Mainnet primero: es la red de producción
-  chains: [celo, celoAlfajores],
+  // Mainnet primero; celoSepolia disponible para testing
+  chains: [celo, celoSepolia],
   wallets: [
     {
       groupName: 'Recomendadas para Celo',
