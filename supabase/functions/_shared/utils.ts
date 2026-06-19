@@ -70,6 +70,29 @@ export function getNetworkConfig(chainId: number) {
 export const TOKEN_CONFIG = MAINNET_TOKEN_CONFIG
 export const CELO_RPC = 'https://forno.celo.org'
 
+// ── Escrow contract ───────────────────────────────────────────────────────────
+export function getEscrowAddress(): string {
+  const addr = Deno.env.get('ESCROW_CONTRACT_ADDRESS')
+  if (!addr) throw new Error('Variable de entorno faltante: ESCROW_CONTRACT_ADDRESS')
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) throw new Error(`ESCROW_CONTRACT_ADDRESS inválida: ${addr}`)
+  return addr
+}
+
+/** pollId (UUID string) → bytes32 usando keccak256, idéntico a ethers.id() */
+export function pollIdToBytes32(pollId: string, ethers: any): string {
+  return ethers.id(pollId)
+}
+
+export const ESCROW_ABI = [
+  'function deposit(bytes32 pollId, address token, uint256 amount) external',
+  'function distribute(bytes32 pollId, address[] calldata winners, uint256[] calldata winnerBps) external',
+  'function cancel(bytes32 pollId) external',
+  'function refundFor(bytes32 pollId, address user) external',
+  'function refund(bytes32 pollId) external',
+  'function getBalance(bytes32 pollId, address user) external view returns (uint256)',
+  'function getPoll(bytes32 pollId) external view returns (address token, uint256 total, bool distributed, bool cancelled)',
+]
+
 /** Convierte monto en unidades legibles (ej. 10.50) a atomics según decimales del token. */
 export function toAtomics(amount: number, decimals: number): bigint {
   // Multiplicar como enteros para evitar errores de punto flotante

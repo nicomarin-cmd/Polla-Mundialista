@@ -1,0 +1,18 @@
+{
+  "name": "polla-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy:mainnet":  "hardhat run scripts/deploy.ts --network celo",
+    "deploy:testnet":  "hardhat run scripts/deploy.ts --network celo-sepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "dotenv": "^16.0.0",
+    "hardhat": "^2.22.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.5.0"
+  }
+}

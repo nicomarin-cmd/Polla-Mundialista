@@ -1,26 +1,24 @@
 // Edge Function: cancelar-polla
-// Cancela una polla abierta y devuelve USDC/USDT/cUSD a cada participante que pagó.
+// 1. Llama PollaEscrow.cancel(pollId) on-chain
+// 2. Por cada pago confirmado, llama PollaEscrow.refundFor(pollId, wallet)
+// 3. Actualiza poll_payments con refund_tx_hash
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { ethers } from 'npm:ethers@6'
 import {
   requireEnv, validateAddress, json, corsHeaders,
-  TOKEN_CONFIG, CELO_RPC, toAtomics, isCryptoMoneda, monedaToTokenSymbol,
+  CELO_RPC, isCryptoMoneda,
+  getEscrowAddress, pollIdToBytes32, ESCROW_ABI,
 } from '../_shared/utils.ts'
-
-const ERC20_ABI = [
-  'function transfer(address to, uint256 amount) external returns (bool)',
-  'function balanceOf(address account) external view returns (uint256)',
-]
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    // ── Validar env vars al inicio ────────────────────────────────────────────
     const supabaseUrl     = requireEnv('SUPABASE_URL')
     const serviceRoleKey  = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
     const operatorPrivKey = requireEnv('PLATFORM_OPERATOR_PRIVATE_KEY')
+    const escrowAddress   = getEscrowAddress()
 
     // ── 1. Auth JWT ───────────────────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization')
@@ -52,25 +50,19 @@ Deno.serve(async (req) => {
     // ── 4. Idempotencia ───────────────────────────────────────────────────────
     if (poll.estado === 'cancelada') {
       const { data: existing } = await db
-        .from('poll_payments')
-        .select('*')
-        .eq('poll_id', poll_id)
-        .order('created_at')
+        .from('poll_payments').select('*').eq('poll_id', poll_id).order('created_at')
       return json({ success: true, already_cancelled: true, refunds: existing ?? [] })
     }
-
     if (poll.estado !== 'abierta') {
       return json({ error: `No se puede cancelar una polla en estado '${poll.estado}'` }, 400)
     }
 
-    // ── 5. Marcar como cancelada ANTES de procesar (evita ejecución doble) ────
+    // ── 5. Marcar cancelada en DB ─────────────────────────────────────────────
     await db.from('pollas').update({ estado: 'cancelada' }).eq('id', poll_id)
 
-    if (!crypto) {
-      return json({ success: true, crypto: false })
-    }
+    if (!crypto) return json({ success: true, crypto: false })
 
-    // ── 6. Obtener pagos confirmados ──────────────────────────────────────────
+    // ── 6. Pagos confirmados ──────────────────────────────────────────────────
     const { data: confirmedPayments } = await db
       .from('poll_payments')
       .select('*')
@@ -81,28 +73,33 @@ Deno.serve(async (req) => {
       return json({ success: true, crypto: true, refunds: [] })
     }
 
-    // ── 7. Preparar signer ────────────────────────────────────────────────────
-    const provider = new ethers.JsonRpcProvider(CELO_RPC)
-    const operatorWallet = new ethers.Wallet(operatorPrivKey, provider)
+    // ── 7. Signer ─────────────────────────────────────────────────────────────
+    const provider      = new ethers.JsonRpcProvider(CELO_RPC)
+    const signer        = new ethers.Wallet(operatorPrivKey, provider)
+    const escrow        = new ethers.Contract(escrowAddress, ESCROW_ABI, signer)
+    const pollIdBytes32 = pollIdToBytes32(poll_id, ethers)
 
-    const tokenSymbol = monedaToTokenSymbol(poll.moneda)
-    const tokenCfg = TOKEN_CONFIG[tokenSymbol]
-    const tokenContract = new ethers.Contract(tokenCfg.address, ERC20_ABI, operatorWallet)
+    // ── 8. Cancelar en el contrato ────────────────────────────────────────────
+    try {
+      const cancelTx = await escrow.cancel(pollIdBytes32)
+      await cancelTx.wait(1)
+    } catch (e: unknown) {
+      // Si ya estaba cancelado en el contrato (reintento), continuar
+      const msg = e instanceof Error ? e.message : ''
+      if (!msg.includes('Poll ended')) throw e
+    }
 
-    // ── 8. Reembolsar ─────────────────────────────────────────────────────────
+    // ── 9. Reembolsar en batch ────────────────────────────────────────────────
     const refunds: any[] = []
 
     for (const payment of confirmedPayments as any[]) {
-      const amountAtomics = toAtomics(payment.amount, tokenCfg.decimals)
-
       try {
         const safeWallet = validateAddress(payment.wallet_address)
-        const tx = await tokenContract.transfer(safeWallet, amountAtomics)
-        const receipt = await tx.wait(1)
+        const tx         = await escrow.refundFor(pollIdBytes32, safeWallet)
+        const receipt    = await tx.wait(1)
         const txHash: string = receipt.hash
 
-        await db
-          .from('poll_payments')
+        await db.from('poll_payments')
           .update({ status: 'refunded', refund_tx_hash: txHash })
           .eq('id', payment.id)
 
@@ -115,24 +112,14 @@ Deno.serve(async (req) => {
           status: 'refunded',
         })
       } catch (txErr: unknown) {
-        const errMsg = txErr instanceof Error ? txErr.message : 'Error de transferencia'
-        console.error(`[cancelar-polla] Refund failed for ${payment.user_id}:`, errMsg)
-        await db
-          .from('poll_payments')
-          .update({ status: 'failed' })
-          .eq('id', payment.id)
-
-        refunds.push({
-          user_id: payment.user_id,
-          wallet: payment.wallet_address,
-          amount: payment.amount,
-          status: 'failed',
-          error: errMsg,
-        })
+        const errMsg = txErr instanceof Error ? txErr.message : 'Error on-chain'
+        console.error(`[cancelar-polla] refundFor failed ${payment.user_id}:`, errMsg)
+        await db.from('poll_payments').update({ status: 'failed' }).eq('id', payment.id)
+        refunds.push({ user_id: payment.user_id, wallet: payment.wallet_address, status: 'failed', error: errMsg })
       }
     }
 
-    return json({ success: true, crypto: true, token: tokenSymbol, refunds })
+    return json({ success: true, crypto: true, refunds })
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Error interno'

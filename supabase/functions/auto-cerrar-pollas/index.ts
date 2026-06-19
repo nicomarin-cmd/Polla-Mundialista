@@ -1,21 +1,16 @@
 // Edge Function: auto-cerrar-pollas
-// Cierra automáticamente todas las pollas abiertas y distribuye los premios on-chain.
-// Llamada desde sync-scores cuando detecta que la Gran Final terminó.
-// Usa service_role — no requiere JWT de admin.
-// Es idempotente: ignorar pollas ya cerradas y distribuciones ya realizadas.
+// Cierra automáticamente todas las pollas abiertas y distribuye los premios
+// llamando a PollaEscrow.distribute() on-chain en una tx por polla.
+// Llamada desde sync-scores cuando la Gran Final termina.
+// Es idempotente: ignora pollas ya cerradas y distribuciones ya realizadas.
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { ethers } from 'npm:ethers@6'
 import {
   requireEnv, validateAddress, json, corsHeaders,
-  TOKEN_CONFIG, CELO_RPC, toAtomics, isCryptoMoneda, monedaToTokenSymbol,
+  TOKEN_CONFIG, CELO_RPC, isCryptoMoneda, monedaToTokenSymbol,
+  getEscrowAddress, pollIdToBytes32, ESCROW_ABI,
 } from '../_shared/utils.ts'
-
-const PLATFORM_FEE = 0.05
-
-const ERC20_ABI = [
-  'function transfer(address to, uint256 amount) external returns (bool)',
-]
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -24,6 +19,7 @@ Deno.serve(async (req) => {
     const supabaseUrl     = requireEnv('SUPABASE_URL')
     const serviceRoleKey  = requireEnv('SUPABASE_SERVICE_ROLE_KEY')
     const operatorPrivKey = requireEnv('PLATFORM_OPERATOR_PRIVATE_KEY')
+    const escrowAddress   = getEscrowAddress()
 
     const db = createClient(supabaseUrl, serviceRoleKey)
 
@@ -34,10 +30,14 @@ Deno.serve(async (req) => {
       .eq('estado', 'abierta')
 
     if (pollErr) throw pollErr
-
     if (!pollasAbiertas?.length) {
       return json({ ok: true, message: 'Sin pollas abiertas', closed: 0 })
     }
+
+    // ── Signer compartido ─────────────────────────────────────────────────────
+    const provider = new ethers.JsonRpcProvider(CELO_RPC)
+    const signer   = new ethers.Wallet(operatorPrivKey, provider)
+    const escrow   = new ethers.Contract(escrowAddress, ESCROW_ABI, signer)
 
     let closedCount = 0
     const results: any[] = []
@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
         continue
       }
 
-      // ── 4. Idempotencia — no redistribuir si ya hay poll_winners ─────────
+      // ── 4. Idempotencia ───────────────────────────────────────────────────
       const { count: existingWinners } = await db
         .from('poll_winners')
         .select('*', { count: 'exact', head: true })
@@ -91,63 +91,66 @@ Deno.serve(async (req) => {
         (profiles ?? []).map((p: any) => [p.id, p.wallet_address])
       )
 
-      // ── 6. Signer on-chain ────────────────────────────────────────────────
-      const provider = new ethers.JsonRpcProvider(CELO_RPC)
-      const operatorWallet = new ethers.Wallet(operatorPrivKey, provider)
-
       const tokenSymbol = monedaToTokenSymbol(polla.moneda)
-      const tokenCfg = TOKEN_CONFIG[tokenSymbol]
-      const tokenContract = new ethers.Contract(tokenCfg.address, ERC20_ABI, operatorWallet)
+      const premios: number[] = polla.premios ?? []
 
-      const distribution: any[] = []
+      // ── 6. Construir args del contrato ────────────────────────────────────
+      const winnerAddresses: string[] = []
+      const winnerBps: bigint[]       = []
 
-      // ── 7. Transferir a cada ganador ──────────────────────────────────────
-      for (const g of ganadores as any[]) {
-        const walletAddress: string | undefined = walletByUser[g.user_id]
-        const netMonto = Math.round(g.monto * (1 - PLATFORM_FEE) * 1e6) / 1e6
-        const amountAtomics = toAtomics(netMonto, tokenCfg.decimals)
+      for (let i = 0; i < ganadores.length; i++) {
+        const g = ganadores[i] as any
+        const pct = premios[i] ?? 0
+        if (pct <= 0) continue
+        const wallet: string | undefined = walletByUser[g.user_id]
+        winnerAddresses.push(wallet ? validateAddress(wallet) : ethers.ZeroAddress)
+        winnerBps.push(BigInt(pct * 100))
 
-        if (!walletAddress) {
+        if (!wallet) {
           await db.from('poll_winners').insert({
             poll_id: polla.id, user_id: g.user_id,
             position: g.puesto, amount_token: g.monto,
             token: tokenSymbol, wallet_address: '', tx_hash: null, status: 'pending_wallet',
           })
-          distribution.push({ user_id: g.user_id, puesto: g.puesto, monto: g.monto, status: 'pending_wallet' })
-          continue
-        }
-
-        try {
-          const safeWallet = validateAddress(walletAddress)
-          const tx = await tokenContract.transfer(safeWallet, amountAtomics)
-          const receipt = await tx.wait(1)
-          const txHash: string = receipt.hash
-
-          await db.from('poll_winners').insert({
-            poll_id: polla.id, user_id: g.user_id,
-            position: g.puesto, amount_token: netMonto,
-            token: tokenSymbol, wallet_address: safeWallet,
-            tx_hash: txHash, status: 'sent',
-          })
-
-          distribution.push({
-            user_id: g.user_id, puesto: g.puesto, monto: netMonto,
-            wallet: safeWallet, tx_hash: txHash, status: 'sent',
-          })
-        } catch (txErr: unknown) {
-          const errMsg = txErr instanceof Error ? txErr.message : 'Error de transferencia'
-          console.error(`[auto-cerrar] Transfer failed ${g.user_id} poll ${polla.id}:`, errMsg)
-          await db.from('poll_winners').insert({
-            poll_id: polla.id, user_id: g.user_id,
-            position: g.puesto, amount_token: g.monto,
-            token: tokenSymbol, wallet_address: walletAddress,
-            tx_hash: null, status: 'failed',
-          })
-          distribution.push({ user_id: g.user_id, puesto: g.puesto, monto: g.monto, status: 'failed', error: errMsg })
         }
       }
 
-      results.push({ poll_id: polla.id, closed: true, crypto: true, distribution })
+      if (!winnerAddresses.length) {
+        results.push({ poll_id: polla.id, closed: true, crypto: true, note: 'sin premios > 0' })
+        continue
+      }
+
+      // ── 7. Llamar al escrow ───────────────────────────────────────────────
+      const pollIdBytes32 = pollIdToBytes32(polla.id, ethers)
+      const distribution: any[] = []
+
+      try {
+        const tx      = await escrow.distribute(pollIdBytes32, winnerAddresses, winnerBps)
+        const receipt = await tx.wait(1)
+        const txHash: string = receipt.hash
+
+        for (let i = 0; i < ganadores.length; i++) {
+          const g = ganadores[i] as any
+          if (!winnerAddresses[i] || winnerAddresses[i] === ethers.ZeroAddress) continue
+          const netMonto = Math.round(g.monto * 0.95 * 1e6) / 1e6
+          await db.from('poll_winners').insert({
+            poll_id: polla.id, user_id: g.user_id,
+            position: g.puesto, amount_token: netMonto,
+            token: tokenSymbol, wallet_address: winnerAddresses[i],
+            tx_hash: txHash, status: 'sent',
+          })
+          distribution.push({
+            user_id: g.user_id, puesto: g.puesto, monto: netMonto,
+            wallet: winnerAddresses[i], tx_hash: txHash, status: 'sent',
+          })
+        }
+
+        results.push({ poll_id: polla.id, closed: true, crypto: true, tx_hash: txHash, distribution })
+      } catch (txErr: unknown) {
+        const errMsg = txErr instanceof Error ? txErr.message : 'Error on-chain'
+        console.error(`[auto-cerrar] distribute failed poll ${polla.id}:`, errMsg)
+        results.push({ poll_id: polla.id, closed: true, crypto: true, error: errMsg })
+      }
     }
 
     return json({ ok: true, closed: closedCount, total: pollasAbiertas.length, results })

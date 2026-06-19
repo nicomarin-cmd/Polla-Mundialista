@@ -1,49 +1,69 @@
 import { useState } from 'react'
 import { useAccount, useChainId, useSwitchChain, useWriteContract, usePublicClient } from 'wagmi'
-import { parseUnits } from 'viem'
+import { parseUnits, keccak256, toHex } from 'viem'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { CELO_MAINNET, monedaToToken, celoscanTx, getTokenDecimals, getTokenAddress } from '../lib/celoTokens'
 
 interface Props {
-  pollId: string
-  amount: number        // en unidades legibles (ej. 10.00)
-  moneda: string        // 'USDC-celo' | 'USDT-celo' | 'cUSD'
+  pollId:    string
+  amount:    number   // en unidades legibles (ej. 10.00)
+  moneda:    string   // 'USDC-celo' | 'USDT-celo' | 'cUSD'
   onSuccess: () => void
 }
 
-type PayState = 'idle' | 'switching' | 'confirming' | 'processing' | 'done' | 'error'
+type PayState = 'idle' | 'switching' | 'approving' | 'depositing' | 'processing' | 'done' | 'error'
 
-const ERC20_TRANSFER_ABI = [
+const ERC20_APPROVE_ABI = [
   {
-    name: 'transfer',
+    name: 'approve',
     type: 'function',
     inputs: [
-      { name: 'to',     type: 'address' },
-      { name: 'amount', type: 'uint256' },
+      { name: 'spender', type: 'address' },
+      { name: 'amount',  type: 'uint256' },
     ],
     outputs: [{ type: 'bool' }],
     stateMutability: 'nonpayable',
   },
 ] as const
 
-export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
-  const { address, isConnected } = useAccount()
-  const chainId = useChainId()
-  const { switchChainAsync } = useSwitchChain()
-  const { writeContractAsync } = useWriteContract()
-  const publicClient = usePublicClient()
-  const { session } = useAuth()
+const ESCROW_DEPOSIT_ABI = [
+  {
+    name: 'deposit',
+    type: 'function',
+    inputs: [
+      { name: 'pollId', type: 'bytes32' },
+      { name: 'token',  type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+] as const
 
-  const [state, setState] = useState<PayState>('idle')
+/** UUID de la polla → bytes32 (keccak256 del string, igual a ethers.id()) */
+function pollIdToBytes32(pollId: string): `0x${string}` {
+  return keccak256(toHex(pollId))
+}
+
+export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
+  const { address, isConnected }   = useAccount()
+  const chainId                    = useChainId()
+  const { switchChainAsync }       = useSwitchChain()
+  const { writeContractAsync }     = useWriteContract()
+  const publicClient               = usePublicClient()
+  const { session }                = useAuth()
+
+  const [state,  setState]  = useState<PayState>('idle')
   const [txHash, setTxHash] = useState<string | null>(null)
   const [errMsg, setErrMsg] = useState('')
 
-  const token = monedaToToken(moneda)
-  const decimals = getTokenDecimals(token)
+  const token        = monedaToToken(moneda)
+  const decimals     = getTokenDecimals(token)
   const targetChainId = Number(import.meta.env.VITE_CHAIN_ID ?? CELO_MAINNET.chainId)
-  const isWrongChain = isConnected && chainId !== targetChainId
-  const platformWallet = import.meta.env.VITE_PLATFORM_WALLET as `0x${string}` | undefined
+  const isWrongChain  = isConnected && chainId !== targetChainId
+
+  const escrowAddress = import.meta.env.VITE_ESCROW_CONTRACT as `0x${string}` | undefined
 
   const callEdgeFunction = async (body: Record<string, unknown>) => {
     const { data: { session: s } } = await supabase.auth.getSession()
@@ -52,8 +72,8 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${s?.access_token}`,
+          'Content-Type':  'application/json',
+          Authorization:   `Bearer ${s?.access_token}`,
         },
         body: JSON.stringify(body),
       }
@@ -65,44 +85,58 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
 
   const handlePay = async () => {
     if (!isConnected || !address || !session) return
-    if (!platformWallet) {
-      setErrMsg('Error de configuración: billetera de destino no configurada. Contactá al administrador.')
+    if (!escrowAddress) {
+      setErrMsg('Error de configuración: contrato de escrow no configurado.')
       setState('error')
       return
     }
     setErrMsg('')
 
     try {
+      // ── 1. Cambiar a Celo si es necesario ──────────────────────────────────
       if (isWrongChain) {
         setState('switching')
         await switchChainAsync({ chainId: targetChainId })
       }
 
+      const tokenAddress  = getTokenAddress(token)
       const amountAtomics = parseUnits(String(amount), decimals)
+      const pollBytes32   = pollIdToBytes32(pollId)
 
-      // Transferencia directa — el usuario paga su propio gas
-      setState('confirming')
-      const hash = await writeContractAsync({
-        address: getTokenAddress(token),
-        abi: ERC20_TRANSFER_ABI,
-        functionName: 'transfer',
-        args: [platformWallet, amountAtomics],
+      // ── 2. Approve: autorizar al escrow a mover los tokens ─────────────────
+      setState('approving')
+      const approveHash = await writeContractAsync({
+        address:      tokenAddress,
+        abi:          ERC20_APPROVE_ABI,
+        functionName: 'approve',
+        args:         [escrowAddress, amountAtomics],
+      })
+      if (!publicClient) throw new Error('Cliente RPC no disponible')
+      await publicClient.waitForTransactionReceipt({ hash: approveHash })
+
+      // ── 3. Deposit: transferir fondos al escrow vinculados a la polla ──────
+      setState('depositing')
+      const depositHash = await writeContractAsync({
+        address:      escrowAddress,
+        abi:          ESCROW_DEPOSIT_ABI,
+        functionName: 'deposit',
+        args:         [pollBytes32, tokenAddress, amountAtomics],
       })
 
       setState('processing')
-      if (!publicClient) throw new Error('Cliente RPC no disponible')
-      await publicClient.waitForTransactionReceipt({ hash })
+      await publicClient.waitForTransactionReceipt({ hash: depositHash })
 
+      // ── 4. Registrar en Supabase ───────────────────────────────────────────
       const data = await callEdgeFunction({
         poll_id:        pollId,
         wallet_address: address,
         token,
-        tx_hash:        hash,
+        tx_hash:        depositHash,
         amount:         amountAtomics.toString(),
         chain_id:       targetChainId,
       })
 
-      setTxHash(data.tx_hash)
+      setTxHash(data.tx_hash ?? depositHash)
       setState('done')
       onSuccess()
 
@@ -149,8 +183,9 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
   const isLoading = state !== 'idle' && state !== 'error'
   const loadingLabel =
     state === 'switching'  ? 'Cambiando a Celo...'
-    : state === 'confirming'? 'Confirmá en tu wallet...'
-    : state === 'processing'? 'Verificando en Celo...'
+    : state === 'approving'  ? 'Aprobando token (1/2)...'
+    : state === 'depositing' ? 'Depositando en escrow (2/2)...'
+    : state === 'processing' ? 'Verificando en Celo...'
     : null
 
   return (
@@ -176,7 +211,7 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
 
       {state === 'idle' && (
         <div className="lockmsg" style={{ marginTop:6 }}>
-          Transferencia en Celo · necesitás un mínimo de CELO para gas
+          2 transacciones: approve + depósito en contrato · necesitás CELO para gas
         </div>
       )}
     </div>
