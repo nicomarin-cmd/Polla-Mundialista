@@ -1286,6 +1286,24 @@ export default function PollAdmin() {
                     </div>
                   )}
 
+                  {/* Reintentar distribución si quedaron pending_wallet */}
+                  {isCryptoMoneda(poll.moneda) && distResult.some(d => d.status === 'pending_wallet') && (
+                    <div className="admin-box" style={{ marginBottom:8, borderColor:'rgba(255,194,75,.3)', background:'rgba(255,194,75,.04)' }}>
+                      <div className="admin-box-label" style={{ color:'var(--gold)' }}>⚠ Distribución incompleta</div>
+                      <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8, lineHeight:1.5 }}>
+                        Uno o más ganadores quedaron pendientes. Ahora que las wallets están disponibles, podés reintentar.
+                      </div>
+                      <button
+                        className="save gold"
+                        style={{ margin:0 }}
+                        disabled={closing}
+                        onClick={cerrarPolla}
+                      >
+                        {closing ? 'Distribuyendo...' : 'Reintentar distribución on-chain'}
+                      </button>
+                    </div>
+                  )}
+
                   <div className="admin-box" style={{ marginBottom:8 }}>
                     <div className="admin-box-label">🛡️ Acción de admin</div>
                     <button className="save ghost" onClick={reabrirPolla} style={{ margin:0 }}>Reabrir polla</button>
