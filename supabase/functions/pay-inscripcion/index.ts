@@ -6,7 +6,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 import { ethers } from 'npm:ethers@6'
 import {
   requireEnv, validateAddress, json, corsHeaders,
-  TOKEN_CONFIG, CELO_RPC, toAtomics,
+  getNetworkConfig, toAtomics,
 } from '../_shared/utils.ts'
 
 // keccak256("Transfer(address,address,uint256)")
@@ -32,14 +32,18 @@ Deno.serve(async (req) => {
 
     // ── 2. Parsear body ──────────────────────────────────────────────────────────
     const body = await req.json()
-    const { poll_id, token, tx_hash, amount } = body
+    const { poll_id, token, tx_hash, amount, chain_id } = body
 
     if (!poll_id || !token || !tx_hash || !amount) {
       return json({ error: 'Faltan parámetros: poll_id, token, tx_hash, amount' }, 400)
     }
 
     const walletAddress = validateAddress(body.wallet_address)
-    const tokenCfg = TOKEN_CONFIG[token]
+
+    // Seleccionar red según chain_id enviado por el cliente (default: mainnet 42220)
+    const networkChainId = Number(chain_id ?? 42220)
+    const network = getNetworkConfig(networkChainId)
+    const tokenCfg = network.tokenConfig[token]
     if (!tokenCfg) return json({ error: `Token no soportado: ${token}` }, 400)
 
     // ── 3. Idempotencia: pago ya confirmado ──────────────────────────────────────
@@ -89,7 +93,7 @@ Deno.serve(async (req) => {
     }
 
     // ── 5. Verificar tx on-chain ─────────────────────────────────────────────────
-    const provider = new ethers.JsonRpcProvider(CELO_RPC)
+    const provider = new ethers.JsonRpcProvider(network.rpc)
     const receipt = await provider.getTransactionReceipt(tx_hash)
 
     if (!receipt || receipt.status !== 1) {
@@ -130,7 +134,7 @@ Deno.serve(async (req) => {
       amount:         polla.inscripcion,
       token,
       chain:          'celo',
-      chain_id:       42220,
+      chain_id:       networkChainId,
       wallet_address: walletAddress,
       tx_hash,
       status:         'confirmed',
@@ -149,7 +153,7 @@ Deno.serve(async (req) => {
     return json({
       success:  true,
       tx_hash,
-      celoscan: `https://celoscan.io/tx/${tx_hash}`,
+      celoscan: `${network.explorer}/tx/${tx_hash}`,
     })
 
   } catch (err: unknown) {
@@ -157,6 +161,7 @@ Deno.serve(async (req) => {
     console.error('[pay-inscripcion]', msg)
     const isUserError = msg.includes('inválid') || msg.includes('faltante') || msg.includes('incorrecto')
       || msg.includes('miembro') || msg.includes('cerrada') || msg.includes('transacción')
+      || msg.includes('Chain ID')
     return json({ error: isUserError ? msg : 'Error al verificar el pago' }, isUserError ? 400 : 500)
   }
 })

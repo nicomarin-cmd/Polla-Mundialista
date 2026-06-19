@@ -94,6 +94,7 @@ export function PaymentButton({ pollId, amount, moneda, onSuccess }: Props) {
         token,
         tx_hash:        hash,
         amount:         amountAtomics.toString(),
+        chain_id:       targetChainId,
       })
 
       setTxHash(data.tx_hash)
